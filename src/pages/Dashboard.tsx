@@ -1,68 +1,174 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Sun,
   Zap,
   Gauge,
   Leaf,
   Users,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { WeatherWidget } from '@/components/dashboard/WeatherWidget';
 import { PowerChart } from '@/components/dashboard/PowerChart';
-
 import { PanelHealthOverview } from '@/components/dashboard/PanelHealthOverview';
-import {
-  mockDashboardMetrics,
-  mockWeather,
-  mockFaultDetections,
-  mockAnalytics
-} from '@/data/mockData';
 import type { DashboardMetrics } from '@/lib/api';
 import type { WeatherData } from '@/types/solar';
+import { Button } from '@/components/ui/button';
+
+// Default empty metrics when API is unavailable
+const defaultMetrics: DashboardMetrics = {
+  totalPanels: 0,
+  healthyPanels: 0,
+  warningPanels: 0,
+  faultPanels: 0,
+  offlinePanels: 0,
+  currentGeneration: 0,
+  maxCapacity: 0,
+  efficiency: 0,
+  carbonSaved: 0,
+  availableTechnicians: 0,
+  openTickets: 0,
+};
+
+// Default empty weather when API is unavailable
+const defaultWeather: WeatherData = {
+  id: '',
+  temperature: 0,
+  condition: 'unknown',
+  humidity: 0,
+  sunlightIntensity: 0,
+  recordedAt: new Date().toISOString(),
+  windSpeed: 0,
+  uvIndex: 0,
+  forecast: [],
+};
+
+// Default empty analytics when API is unavailable
+const defaultAnalytics = {
+  powerGeneration: {
+    daily: [],
+    weekly: [],
+    monthly: [],
+  },
+};
 
 interface DashboardData {
   metrics: DashboardMetrics;
   weather: WeatherData;
-  analytics: typeof mockAnalytics;
+  analytics: typeof defaultAnalytics;
+}
+
+// Helper function to add timeout to fetch requests
+function fetchWithTimeout(url: string, timeoutMs: number = 10000): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`Request timeout: ${url}`));
+    }, timeoutMs);
+
+    fetch(url)
+      .then((response) => {
+        clearTimeout(timeoutId);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
 }
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardData>({
+    metrics: defaultMetrics,
+    weather: defaultWeather,
+    analytics: defaultAnalytics,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const mountedRef = useRef(true);
 
+  // Cleanup on unmount
   useEffect(() => {
-    async function fetchData() {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  async function fetchData() {
+    if (!mountedRef.current) return;
+    
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Set a timeout for the entire operation
+      const totalTimeout = 15000; // 15 seconds max for entire dashboard
+      const overallTimeoutId = setTimeout(() => {
+        if (mountedRef.current) {
+          console.warn('Dashboard data fetch timeout - using default values');
+          setError('Request timed out - using cached/default values');
+        }
+      }, totalTimeout);
+
       try {
-        // Fetch all data from real APIs
+        // Fetch all data with individual timeouts
         const [metricsRes, weatherRes, powerDailyRes, powerWeeklyRes, powerMonthlyRes] = await Promise.all([
-          fetch('/api/analytics/dashboard'),
-          fetch('/api/weather/current'),
-          fetch('/api/analytics/power?period=daily'),
-          fetch('/api/analytics/power?period=weekly'),
-          fetch('/api/analytics/power?period=monthly'),
+          fetchWithTimeout('/api/analytics/dashboard', 10000).catch(e => ({ ok: false } as Response)),
+          fetchWithTimeout('/api/weather/current', 10000).catch(e => ({ ok: false } as Response)),
+          fetchWithTimeout('/api/analytics/power?period=daily', 10000).catch(e => ({ ok: false } as Response)),
+          fetchWithTimeout('/api/analytics/power?period=weekly', 10000).catch(e => ({ ok: false } as Response)),
+          fetchWithTimeout('/api/analytics/power?period=monthly', 10000).catch(e => ({ ok: false } as Response)),
         ]);
 
-        const metrics = metricsRes.ok ? await metricsRes.json() : mockDashboardMetrics;
-        const weatherApi = weatherRes.ok ? await weatherRes.json() : null;
-        const powerDaily = powerDailyRes.ok ? await powerDailyRes.json() : mockAnalytics.powerGeneration.daily;
-        const powerWeekly = powerWeeklyRes.ok ? await powerWeeklyRes.json() : mockAnalytics.powerGeneration.weekly;
-        const powerMonthly = powerMonthlyRes.ok ? await powerMonthlyRes.json() : mockAnalytics.powerGeneration.monthly;
+        clearTimeout(overallTimeoutId);
 
-        // Transform weather data
-        const weather = weatherApi ? {
-          ...weatherApi,
-          windSpeed: 15, // default
-          uvIndex: Math.floor(weatherApi.sunlightIntensity / 10), // estimate
-          forecast: mockWeather.forecast, // use mock forecast
-        } : mockWeather;
+        if (!mountedRef.current) return;
+
+        let metrics = defaultMetrics;
+        if (metricsRes.ok) {
+          try {
+            metrics = await metricsRes.json();
+          } catch (e) {
+            console.warn('Failed to parse metrics response');
+          }
+        }
+
+        let weather = defaultWeather;
+        if (weatherRes.ok) {
+          try {
+            const weatherApi = await weatherRes.json();
+            weather = {
+              ...weatherApi,
+              windSpeed: weatherApi.windSpeed || 0,
+              uvIndex: Math.floor((weatherApi.sunlightIntensity || 0) / 10),
+              forecast: weatherApi.forecast || [],
+            };
+          } catch (e) {
+            console.warn('Failed to parse weather response');
+          }
+        }
+
+        let powerDaily: any[] = [];
+        let powerWeekly: any[] = [];
+        let powerMonthly: any[] = [];
+
+        if (powerDailyRes.ok) {
+          try { powerDaily = await powerDailyRes.json(); } catch (e) { console.warn('Failed to parse daily power data'); }
+        }
+        if (powerWeeklyRes.ok) {
+          try { powerWeekly = await powerWeeklyRes.json(); } catch (e) { console.warn('Failed to parse weekly power data'); }
+        }
+        if (powerMonthlyRes.ok) {
+          try { powerMonthly = await powerMonthlyRes.json(); } catch (e) { console.warn('Failed to parse monthly power data'); }
+        }
 
         setData({
           metrics,
           weather,
           analytics: {
-            ...mockAnalytics,
             powerGeneration: {
               daily: powerDaily,
               weekly: powerWeekly,
@@ -70,19 +176,23 @@ export default function Dashboard() {
             },
           },
         });
+        setError(null);
       } catch (err) {
-        console.log('Using mock data (API unavailable):', err);
-        // Fallback to mock data
-        setData({
-          metrics: mockDashboardMetrics,
-          weather: mockWeather,
-          analytics: mockAnalytics
-        });
-      } finally {
+        clearTimeout(overallTimeoutId);
+        if (!mountedRef.current) return;
+        console.warn('Dashboard fetch failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+        // Keep default values
+      }
+    } finally {
+      if (mountedRef.current) {
         setLoading(false);
+        setIsRetrying(false);
       }
     }
+  }
 
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -97,23 +207,41 @@ export default function Dashboard() {
     );
   }
 
-  if (error || !data) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
-        <div className="text-center text-destructive">
-          <p className="text-lg font-semibold">Error loading data</p>
-          <p className="text-muted-foreground">{error || 'No data available'}</p>
-        </div>
-      </div>
-    );
-  }
-
   const { metrics, weather, analytics } = data;
-
-
 
   return (
     <div className="space-y-6">
+      {/* Error/Timeout Banner */}
+      {error && (
+        <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+              <div>
+                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                  Unable to load some dashboard data
+                </p>
+                <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                  {error} - Displaying cached/default values
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsRetrying(true);
+                fetchData();
+              }}
+              disabled={isRetrying}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isRetrying ? 'animate-spin' : ''}`} />
+              {isRetrying ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>

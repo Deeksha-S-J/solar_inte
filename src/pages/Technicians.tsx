@@ -14,7 +14,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { mockTechnicians, mockTickets } from '@/data/mockData';
 import { Technician } from '@/types/solar';
 import { cn } from '@/lib/utils';
 import {
@@ -51,7 +50,7 @@ interface NewTechnicianData {
 }
 
 export default function Technicians() {
-  const [technicians, setTechnicians] = useState<Technician[]>(mockTechnicians);
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTech, setSelectedTech] = useState<Technician | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -81,7 +80,8 @@ export default function Technicians() {
           }
         }
       } catch (err) {
-        console.log('Using mock technician data');
+        console.warn('API unavailable, showing empty technicians');
+        // Technicians remain empty
       } finally {
         setLoading(false);
       }
@@ -92,8 +92,7 @@ export default function Technicians() {
   const totalTechnicians = technicians.length;
   const availableCount = technicians.filter(t => t.status === 'available').length;
   const busyCount = technicians.filter(t => t.status === 'busy').length;
-
-  const openTickets = mockTickets.filter(t => t.status === 'open').length;
+  const offlineCount = totalTechnicians - availableCount - busyCount;
 
   const handleDeleteTechnician = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this technician?')) {
@@ -131,7 +130,7 @@ export default function Technicians() {
         phone: '+91' + newTechnician.phoneDigits,
         skills: newTechnician.skills.split(',').map(s => s.trim()).filter(s => s),
         certifications: newTechnician.certifications.split(',').map(s => s.trim()).filter(s => s),
-        status: 'available',
+        status: 'available' as const,
         activeTickets: 0,
         resolvedTickets: 0,
         avgResolutionTime: 0,
@@ -345,138 +344,156 @@ export default function Technicians() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Unassigned</p>
-                <p className="text-3xl font-bold text-blue-500">{openTickets}</p>
+                <p className="text-sm text-muted-foreground">Offline</p>
+                <p className="text-3xl font-bold text-muted-foreground">{offlineCount}</p>
               </div>
-              <div className="rounded-xl bg-blue-500/10 p-3">
-                <AlertCircle className="h-6 w-6 text-blue-500" />
+              <div className="rounded-xl bg-muted/10 p-3">
+                <AlertCircle className="h-6 w-6 text-muted-foreground" />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Technician Grid */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {technicians.map(tech => (
-          <Card
-            key={tech.id}
-            className={cn(
-              'card-hover cursor-pointer',
-              selectedTech?.id === tech.id && 'ring-2 ring-primary'
-            )}
-            onClick={() => setSelectedTech(tech)}
-          >
-            <CardContent className="p-6">
-              {/* Header */}
-              <div className="flex items-start gap-4">
-                <div className="relative">
-                  <Avatar className="h-16 w-16">
-                    <AvatarImage src={tech.avatar} />
-                    <AvatarFallback>{tech.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-                  </Avatar>
-                  <div className={cn(
-                    'absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-card',
-                    statusDots[tech.status]
-                  )} />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold">{tech.name}</h3>
-                      <Badge className={cn('mt-1', statusColors[tech.status])}>
-                        {tech.status}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Star className="h-4 w-4 fill-warning text-warning" />
-                      <span className="text-sm font-medium">{tech.rating.toFixed(1)}</span>
+      {/* Empty State */}
+      {technicians.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Award className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-semibold">No technicians found</h3>
+          <p className="text-muted-foreground">Add your first technician to get started.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {technicians.map(tech => (
+            <Card
+              key={tech.id}
+              className={cn(
+                'card-hover cursor-pointer',
+                selectedTech?.id === tech.id && 'ring-2 ring-primary'
+              )}
+              onClick={() => setSelectedTech(tech)}
+            >
+              <CardContent className="p-6">
+                {/* Header */}
+                <div className="flex items-start gap-4">
+                  <div className="relative">
+                    <Avatar className="h-16 w-16">
+                      <AvatarImage src={tech.avatar} />
+                      <AvatarFallback>{tech.name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
+                    </Avatar>
+                    <div className={cn(
+                      'absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-card',
+                      statusDots[tech.status]
+                    )} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="font-semibold">{tech.name}</h3>
+                        <Badge className={cn('mt-1', statusColors[tech.status])}>
+                          {tech.status}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Star className="h-4 w-4 fill-warning text-warning" />
+                        <span className="text-sm font-medium">{tech.rating.toFixed(1)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Contact */}
-              <div className="mt-4 space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Mail className="h-4 w-4" />
-                  <span>{tech.email}</span>
+                {/* Contact */}
+                <div className="mt-4 space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Mail className="h-4 w-4" />
+                    <span>{tech.email}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Phone className="h-4 w-4" />
+                    <span>{tech.phone}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Phone className="h-4 w-4" />
-                  <span>{tech.phone}</span>
-                </div>
-              </div>
 
-              {/* Skills */}
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">Skills</p>
-                <div className="flex flex-wrap gap-1">
-                  {tech.skills.slice(0, 3).map(skill => (
-                    <Badge key={skill} variant="secondary" className="text-xs">
-                      {skill}
-                    </Badge>
-                  ))}
-                  {tech.skills.length > 3 && (
-                    <Badge variant="secondary" className="text-xs">
-                      +{tech.skills.length - 3}
-                    </Badge>
+                {/* Skills */}
+                <div className="mt-4">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Skills</p>
+                  <div className="flex flex-wrap gap-1">
+                    {tech.skills.length > 0 ? (
+                      <>
+                        {tech.skills.slice(0, 3).map(skill => (
+                          <Badge key={skill} variant="secondary" className="text-xs">
+                            {skill}
+                          </Badge>
+                        ))}
+                        {tech.skills.length > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{tech.skills.length - 3}
+                          </Badge>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">No skills added</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div className="mt-4 grid grid-cols-3 gap-4 border-t pt-4">
+                  <div className="text-center">
+                    <p className="text-lg font-semibold">{tech.activeTickets}</p>
+                    <p className="text-xs text-muted-foreground">Active</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-semibold">{tech.resolvedTickets}</p>
+                    <p className="text-xs text-muted-foreground">Resolved</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-semibold">{tech.avgResolutionTime.toFixed(1)}h</p>
+                    <p className="text-xs text-muted-foreground">Avg Time</p>
+                  </div>
+                </div>
+
+                {/* Workload */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Workload</span>
+                    <span className="font-medium">{Math.min(tech.activeTickets * 25, 100)}%</span>
+                  </div>
+                  <Progress value={Math.min(tech.activeTickets * 25, 100)} className="mt-2 h-2" />
+                </div>
+
+                {/* Certifications */}
+                <div className="mt-4 flex flex-wrap gap-1">
+                  {tech.certifications.length > 0 ? (
+                    tech.certifications.map(cert => (
+                      <Badge key={cert} variant="outline" className="text-xs">
+                        <Award className="mr-1 h-3 w-3" />
+                        {cert}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No certifications</span>
                   )}
                 </div>
-              </div>
 
-              {/* Stats */}
-              <div className="mt-4 grid grid-cols-3 gap-4 border-t pt-4">
-                <div className="text-center">
-                  <p className="text-lg font-semibold">{tech.activeTickets}</p>
-                  <p className="text-xs text-muted-foreground">Active</p>
+                {/* Actions */}
+                <div className="mt-4 flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1">
+                    <Calendar className="mr-2 h-4 w-4" />
+                    Schedule
+                  </Button>
+                  <Button size="sm" className="flex-1" disabled={tech.status !== 'available'}>
+                    Assign Ticket
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleDeleteTechnician(tech.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="text-center">
-                  <p className="text-lg font-semibold">{tech.resolvedTickets}</p>
-                  <p className="text-xs text-muted-foreground">Resolved</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-semibold">{tech.avgResolutionTime.toFixed(1)}h</p>
-                  <p className="text-xs text-muted-foreground">Avg Time</p>
-                </div>
-              </div>
-
-              {/* Workload */}
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Workload</span>
-                  <span className="font-medium">{Math.min(tech.activeTickets * 25, 100)}%</span>
-                </div>
-                <Progress value={Math.min(tech.activeTickets * 25, 100)} className="mt-2 h-2" />
-              </div>
-
-              {/* Certifications */}
-              <div className="mt-4 flex flex-wrap gap-1">
-                {tech.certifications.map(cert => (
-                  <Badge key={cert} variant="outline" className="text-xs">
-                    <Award className="mr-1 h-3 w-3" />
-                    {cert}
-                  </Badge>
-                ))}
-              </div>
-
-              {/* Actions */}
-              <div className="mt-4 flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Schedule
-                </Button>
-                <Button size="sm" className="flex-1" disabled={tech.status !== 'available'}>
-                  Assign Ticket
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => handleDeleteTechnician(tech.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

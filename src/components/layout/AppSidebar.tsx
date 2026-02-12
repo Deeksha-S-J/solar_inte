@@ -2,7 +2,6 @@ import {
   LayoutDashboard,
   Grid3X3,
   Ticket,
-  BarChart3,
   Users,
   Settings,
   AlertTriangle,
@@ -32,7 +31,6 @@ const mainNavItems = [
   { title: 'Alerts', url: '/alerts', icon: AlertTriangle },
   { title: 'Panel Grid', url: '/panels', icon: Grid3X3 },
   { title: 'Tickets', url: '/tickets', icon: Ticket },
-  { title: 'Analytics', url: '/analytics', icon: BarChart3 },
   { title: 'Technicians', url: '/technicians', icon: Users },
 ];
 

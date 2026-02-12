@@ -1,30 +1,37 @@
-# Fix Plan
+# Todo Fix - Loading Issue ✅ COMPLETED
 
-## Critical Errors to Fix
+## Problem
+The Dashboard page makes multiple parallel API calls using `Promise.all`. If any of these calls hang (due to:
+- Server not running
+- Database connection issues
+- Slow queries
+- Network issues
 
-### 1. Tickets.tsx - JSX Structure Error
-- Issue: Missing closing `</CardContent>` and `</Card>` tags inside the ticket mapping
-- Location: Inside `filteredTickets.map(ticket => {` block
+The loading spinner stays forever because the `finally` block never executes.
 
-### 2. Dashboard.tsx - Missing Button Closing Tags  
-- Issue: Missing `</Button>` tags after onClick handlers in AlertCard
-- Location: Line 93 area - `onCreateTicket={handleCreateTicket}` and `onDismiss={handleDismiss}`
+## Solution - IMPLEMENTED
+1. ✅ Added timeout wrapper for API calls (10 second max per request, 15 second overall)
+2. ✅ Modified Dashboard.tsx to handle timeouts gracefully
+3. ✅ Added mountedRef to prevent state updates on unmounted components
+4. ✅ Added error state with retry button for better UX
+5. ✅ Individual JSON parse error handling for each API response
 
-### 3. Badge Color Issues - Invalid "info" color
-- Issue: Using undefined `info` color variant that doesn't exist in shadcn/ui
-- Files affected:
-  - Technicians.tsx (line 116: `text-info`)
-  - Dashboard.tsx (line 93: `variant="info"`)
-  - Tickets.tsx (multiple `text-info` and `bg-info` usages)
+## Additional Fix - Seed Script
+The seed script was auto-running and re-adding deleted data. Fixed by:
+- ✅ Modified seed.ts to skip if SKIP_SEED=true
+- ✅ Updated dev script to set SKIP_SEED=true
+- ✅ Modified technician creation to use create() instead of upsert() - only creates if doesn't exist
 
-## Fix Strategy
+## Files Modified
+- `src/pages/Dashboard.tsx` - Complete rewrite with timeout handling
+- `server/prisma/seed.ts` - Skip seeding in watch mode, only create if not exists
+- `server/package.json` - Added SKIP_SEED=true to dev script
 
-1. Fix Tickets.tsx JSX structure - close the CardContent and Card properly
-2. Fix Dashboard.tsx - add missing </Button> closing tags
-3. Replace `info` color with `default` or `secondary` (valid shadcn/ui colors)
-
-## Files to Modify
-- src/pages/Tickets.tsx
-- src/pages/Dashboard.tsx
-- src/pages/Technicians.tsx
+## Key Changes
+1. **fetchWithTimeout helper**: Adds 10-second timeout to each API call
+2. **Overall timeout**: 15-second safety net for entire dashboard load
+3. **mountedRef**: Prevents state updates on unmounted components
+4. **Error banner**: Yellow warning banner when data fails to load with Retry button
+5. **Graceful degradation**: Shows default values (0s) when APIs unavailable
+6. **Seed protection**: Deleted data won't be re-added during development
 

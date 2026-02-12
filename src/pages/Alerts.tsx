@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { AlertCard } from '@/components/dashboard/AlertCard';
-import { mockFaultDetections } from '@/data/mockData';
 import type { FaultDetection } from '@/types/solar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,7 +12,6 @@ import { formatDistanceToNow } from 'date-fns';
 export default function Alerts() {
     const [faults, setFaults] = useState<FaultDetection[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [selectedFault, setSelectedFault] = useState<FaultDetection | null>(null);
     const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [creatingTicket, setCreatingTicket] = useState(false);
@@ -31,12 +29,10 @@ export default function Alerts() {
                         detectedAt: new Date(f.detectedAt),
                     }));
                     setFaults(transformed);
-                } else {
-                    setFaults(mockFaultDetections);
                 }
             } catch (err) {
-                console.log('Using mock data (API unavailable):', err);
-                setFaults(mockFaultDetections);
+                console.warn('API unavailable, showing empty alerts');
+                // Faults remain empty
             } finally {
                 setLoading(false);
             }
@@ -85,7 +81,7 @@ export default function Alerts() {
                 });
                 setCreateDialogOpen(false);
                 setSelectedFault(null);
-                // Optionally remove the fault from the list or refresh
+                // Remove the fault from the list
                 setFaults(prev => prev.filter(f => f.id !== selectedFault.id));
             } else {
                 throw new Error('Failed to create ticket');
@@ -103,7 +99,6 @@ export default function Alerts() {
     };
 
     const handleDismiss = (faultId: string) => {
-        console.log('Dismiss fault:', faultId);
         setFaults(prev => prev.filter(f => f.id !== faultId));
     };
 
@@ -113,17 +108,6 @@ export default function Alerts() {
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
                     <p className="text-muted-foreground">Loading alerts...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
-                <div className="text-center text-destructive">
-                    <p className="text-lg font-semibold">Error loading alerts</p>
-                    <p className="text-muted-foreground">{error}</p>
                 </div>
             </div>
         );
@@ -253,3 +237,4 @@ export default function Alerts() {
         </div>
     );
 }
+

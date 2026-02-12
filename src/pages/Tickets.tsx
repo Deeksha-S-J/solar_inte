@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { mockTickets, mockTechnicians } from '@/data/mockData';
 import { cn } from '@/lib/utils';
 import {
   Search,
@@ -67,7 +66,7 @@ interface TicketFromAPI {
 const statusColors: Record<string, string> = {
   open: 'bg-blue-500/10 text-blue-500 border-blue-500/30',
   'in-progress': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
-  'in_progress': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
+  in_progress: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
   resolved: 'bg-green-500/10 text-green-500 border-green-500/30',
   closed: 'bg-muted text-muted-foreground border-muted',
 };
@@ -93,7 +92,6 @@ export default function Tickets() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [useMockData, setUseMockData] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [technicianFilter, setTechnicianFilter] = useState<string>('all');
@@ -123,22 +121,11 @@ export default function Tickets() {
               .filter((t: TicketFromAPI) => t.assignedTechnician)
               .map((t: TicketFromAPI) => t.assignedTechnician!);
             setTechnicians(techs);
-            setUseMockData(false);
-          } else {
-            setTickets(mockTickets as unknown as TicketFromAPI[]);
-            setTechnicians(mockTechnicians as unknown as { id: string; name: string; avatar: string | null }[]);
-            setUseMockData(true);
           }
-        } else {
-          setTickets(mockTickets as unknown as TicketFromAPI[]);
-          setTechnicians(mockTechnicians as unknown as { id: string; name: string; avatar: string | null }[]);
-          setUseMockData(true);
         }
       } catch (err) {
-        console.log('Using mock ticket data');
-        setTickets(mockTickets as unknown as TicketFromAPI[]);
-        setTechnicians(mockTechnicians as unknown as { id: string; name: string; avatar: string | null }[]);
-        setUseMockData(true);
+        console.warn('API unavailable, showing empty tickets');
+        // Data remains empty
       } finally {
         setLoading(false);
       }
@@ -251,14 +238,6 @@ export default function Tickets() {
 
   return (
     <div className="space-y-6">
-      {useMockData && (
-        <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/30 p-4">
-          <p className="text-sm text-yellow-500">
-            Using demo data. Connect to database with real tickets to see live data.
-          </p>
-        </div>
-      )}
-
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Tickets & Maintenance</h1>
         <p className="text-muted-foreground">
@@ -564,8 +543,18 @@ export default function Tickets() {
         </DialogContent>
       </Dialog>
 
-      {/* Tickets List */}
-      {filteredTickets.length > 0 ? (
+      {/* Empty State */}
+      {filteredTickets.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <CheckCircle className="h-12 w-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-semibold">No tickets found</h3>
+          <p className="text-muted-foreground">
+            {tickets.length === 0 
+              ? 'Create your first ticket to get started.' 
+              : 'Try adjusting your filters.'}
+          </p>
+        </div>
+      ) : (
         <div className="space-y-4">
           {filteredTickets.map(ticket => {
             const technician = getTechnician(ticket.assignedTechnicianId);
@@ -650,10 +639,6 @@ export default function Tickets() {
               </Card>
             );
           })}
-        </div>
-      ) : (
-        <div className="flex h-40 items-center justify-center rounded-lg border border-dashed">
-          <p className="text-muted-foreground">No tickets found matching your filters</p>
         </div>
       )}
     </div>
