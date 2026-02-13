@@ -16,40 +16,89 @@ import type { DashboardMetrics } from '@/lib/api';
 import type { WeatherData } from '@/types/solar';
 import { Button } from '@/components/ui/button';
 
-// Default empty metrics when API is unavailable
+// Default sample metrics when API is unavailable
 const defaultMetrics: DashboardMetrics = {
-  totalPanels: 0,
-  healthyPanels: 0,
-  warningPanels: 0,
-  faultPanels: 0,
+  totalPanels: 100,
+  healthyPanels: 95,
+  warningPanels: 3,
+  faultPanels: 2,
   offlinePanels: 0,
-  currentGeneration: 0,
-  maxCapacity: 0,
-  efficiency: 0,
-  carbonSaved: 0,
-  availableTechnicians: 0,
-  openTickets: 0,
+  currentGeneration: 45.5,
+  maxCapacity: 50,
+  efficiency: 91,
+  carbonSaved: 1250,
+  availableTechnicians: 5,
+  openTickets: 2,
 };
 
-// Default empty weather when API is unavailable
+// Default sample weather when API is unavailable
 const defaultWeather: WeatherData = {
-  id: '',
-  temperature: 0,
-  condition: 'unknown',
-  humidity: 0,
-  sunlightIntensity: 0,
+  id: 'sample',
+  temperature: 28,
+  condition: 'sunny',
+  humidity: 45,
+  sunlightIntensity: 850,
   recordedAt: new Date().toISOString(),
-  windSpeed: 0,
-  uvIndex: 0,
-  forecast: [],
+  windSpeed: 12,
+  uvIndex: 8,
+  forecast: [
+    { hour: 12, temperature: 28, condition: 'sunny', sunlightIntensity: 80 },
+    { hour: 15, temperature: 30, condition: 'sunny', sunlightIntensity: 85 },
+    { hour: 18, temperature: 26, condition: 'partly-cloudy', sunlightIntensity: 60 },
+  ],
 };
 
-// Default empty analytics when API is unavailable
+// Helper to create date for today at specific hour
+const createDate = (hour: number) => {
+  const date = new Date();
+  date.setHours(hour, 0, 0, 0);
+  return date;
+};
+
+// Helper to create date for day of week
+const createWeekDate = (dayOffset: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - date.getDay() + dayOffset);
+  date.setHours(12, 0, 0, 0);
+  return date;
+};
+
+// Helper to create date for month
+const createMonthDate = (month: number) => {
+  const date = new Date();
+  date.setMonth(month, 15);
+  date.setHours(12, 0, 0, 0);
+  return date;
+};
+
+// Default sample analytics when API is unavailable
 const defaultAnalytics = {
   powerGeneration: {
-    daily: [],
-    weekly: [],
-    monthly: [],
+    daily: [
+      { timestamp: createDate(6), value: 0 },
+      { timestamp: createDate(9), value: 15 },
+      { timestamp: createDate(12), value: 42 },
+      { timestamp: createDate(15), value: 48 },
+      { timestamp: createDate(18), value: 35 },
+      { timestamp: createDate(21), value: 5 },
+    ],
+    weekly: [
+      { timestamp: createWeekDate(1), value: 180 },
+      { timestamp: createWeekDate(2), value: 195 },
+      { timestamp: createWeekDate(3), value: 210 },
+      { timestamp: createWeekDate(4), value: 185 },
+      { timestamp: createWeekDate(5), value: 200 },
+      { timestamp: createWeekDate(6), value: 175 },
+      { timestamp: createWeekDate(7), value: 190 },
+    ],
+    monthly: [
+      { timestamp: createMonthDate(0), value: 5200 },
+      { timestamp: createMonthDate(1), value: 4800 },
+      { timestamp: createMonthDate(2), value: 6100 },
+      { timestamp: createMonthDate(3), value: 5800 },
+      { timestamp: createMonthDate(4), value: 6500 },
+      { timestamp: createMonthDate(5), value: 6200 },
+    ],
   },
 };
 
@@ -193,7 +242,8 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetchData();
+    // fetchData(); // Commented out to load with default data immediately
+    setLoading(false);
   }, []);
 
   if (loading) {

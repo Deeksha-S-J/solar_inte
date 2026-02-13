@@ -81,11 +81,9 @@ Service technicians who maintain and repair the solar panels.
 | avatar | String? | | Profile image URL |
 | status | TechStatus | Enum | available, busy, offline |
 | skills | String[] | | Array of skill names |
-| certifications | String[] | | Array of certification names |
 | activeTickets | Int | @default(0) | Current assigned tickets |
 | resolvedTickets | Int | @default(0) | Total resolved tickets |
 | avgResolutionTime | Float | @default(0) | Average hours to resolve |
-| rating | Float | @default(0) | 0-5 rating score |
 | createdAt | DateTime | @default(now()) | Creation timestamp |
 | updatedAt | DateTime | @updatedAt | Last update timestamp |
 

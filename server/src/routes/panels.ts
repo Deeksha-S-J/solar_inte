@@ -132,7 +132,6 @@ router.get('/:id', async (req: Request, res: Response) => {
       include: {
         zone: true,
         tickets: {
-          include: { assignedTechnician: true },
           orderBy: { createdAt: 'desc' },
           take: 5,
         },

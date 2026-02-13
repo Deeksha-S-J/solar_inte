@@ -129,6 +129,11 @@ export default function Tickets() {
       }
     }
     fetchData();
+
+    // Refetch when window gets focus to update counts after assignments from other pages
+    const handleFocus = () => fetchData();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const ticketCounts = {

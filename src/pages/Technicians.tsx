@@ -19,7 +19,6 @@ import { cn } from '@/lib/utils';
 import {
   Phone,
   Mail,
-  Star,
   Clock,
   CheckCircle,
   AlertCircle,
@@ -27,6 +26,7 @@ import {
   Calendar,
   Award,
   UserPlus,
+  Pencil,
   Trash2
 } from 'lucide-react';
 
@@ -47,7 +47,13 @@ interface NewTechnicianData {
   email: string;
   phoneDigits: string;
   skills: string;
-  certifications: string;
+}
+
+interface TechnicianFormData {
+  name: string;
+  email: string;
+  phoneDigits: string;
+  skills: string;
 }
 
 export default function Technicians() {
@@ -59,14 +65,18 @@ export default function Technicians() {
     name: '',
     email: '',
     phoneDigits: '',
-    skills: '',
-    certifications: ''
+    skills: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
-  const [availableTickets, setAvailableTickets] = useState<Ticket[]>([]);
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
-  const [assigningTech, setAssigningTech] = useState<Technician | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingTechnicianId, setEditingTechnicianId] = useState<string | null>(null);
+  const [editTechnician, setEditTechnician] = useState<TechnicianFormData>({
+    name: '',
+    email: '',
+    phoneDigits: '',
+    skills: ''
+  });
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduledTech, setScheduledTech] = useState<Technician | null>(null);
   const [assignedTickets, setAssignedTickets] = useState<Ticket[]>([]);
@@ -80,11 +90,10 @@ export default function Technicians() {
         if (techResponse.ok) {
           const techData = await techResponse.json();
           if (techData.length > 0) {
-            // Parse skills and certifications from JSON strings
+            // Parse skills from JSON strings
             const parsedData = techData.map((tech: any) => ({
               ...tech,
-              skills: JSON.parse(tech.skills || '[]'),
-              certifications: JSON.parse(tech.certifications || '[]'),
+              skills: parseSkillsField(tech.skills),
             }));
             setTechnicians(parsedData);
           }
@@ -110,9 +119,50 @@ export default function Technicians() {
   const availableCount = technicians.filter(t => t.status === 'available').length;
   const busyCount = technicians.filter(t => t.status === 'busy').length;
   const offlineCount = totalTechnicians - availableCount - busyCount;
+  const parseSkillsField = (skills: unknown): string[] => {
+    if (Array.isArray(skills)) {
+      return skills.map(s => String(s).trim()).filter(Boolean);
+    }
+    if (typeof skills === 'string') {
+      try {
+        const parsed = JSON.parse(skills);
+        return Array.isArray(parsed) ? parsed.map(s => String(s).trim()).filter(Boolean) : [];
+      } catch {
+        return skills.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+    return [];
+  };
+
+  const validateTechnicianForm = (data: TechnicianFormData) => {
+    if (!data.name.trim() || !data.email.trim() || !data.phoneDigits.trim() || !data.skills.trim()) {
+      alert('All fields are mandatory');
+      return false;
+    }
+    if (data.name.trim().length > 20) {
+      alert('Name must be 20 characters or less');
+      return false;
+    }
+    if (data.phoneDigits.length !== 10) {
+      alert('Phone number must be exactly 10 digits');
+      return false;
+    }
+    const parsedSkills = data.skills.split(',').map(s => s.trim()).filter(Boolean);
+    if (parsedSkills.length === 0) {
+      alert('Skills field is mandatory');
+      return false;
+    }
+    return true;
+  };
 
   const handleDeleteTechnician = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this technician?')) {
+      // Frontend fallback records use temporary ids and don't exist in the API.
+      if (id.startsWith('tech-')) {
+        setTechnicians(prev => prev.filter(t => t.id !== id));
+        return;
+      }
+
       try {
         const response = await fetch(`/api/technicians/${id}`, {
           method: 'DELETE',
@@ -120,7 +170,16 @@ export default function Technicians() {
         if (response.ok) {
           setTechnicians(prev => prev.filter(t => t.id !== id));
         } else {
-          alert('Failed to delete technician');
+          let errorMessage = 'Failed to delete technician';
+          try {
+            const errorData = await response.json();
+            if (errorData?.error) {
+              errorMessage = errorData.error;
+            }
+          } catch {
+            // Keep default error message when body is not JSON
+          }
+          alert(errorMessage);
         }
       } catch (err) {
         console.error('Failed to delete technician:', err);
@@ -130,12 +189,7 @@ export default function Technicians() {
   };
 
   const handleAddTechnician = async () => {
-    if (!newTechnician.name || !newTechnician.email) {
-      alert('Please fill in required fields');
-      return;
-    }
-    if (newTechnician.phoneDigits.length !== 10) {
-      alert('Phone number must be exactly 10 digits');
+    if (!validateTechnicianForm(newTechnician)) {
       return;
     }
 
@@ -146,12 +200,10 @@ export default function Technicians() {
         email: newTechnician.email,
         phone: '+91' + newTechnician.phoneDigits,
         skills: newTechnician.skills.split(',').map(s => s.trim()).filter(s => s),
-        certifications: newTechnician.certifications.split(',').map(s => s.trim()).filter(s => s),
         status: 'available' as const,
         activeTickets: 0,
         resolvedTickets: 0,
         avgResolutionTime: 0,
-        rating: 5.0,
       };
 
       const response = await fetch('/api/technicians', {
@@ -162,11 +214,10 @@ export default function Technicians() {
 
       if (response.ok) {
         const created = await response.json();
-        // Parse skills and certifications from JSON strings
+        // Parse skills from JSON strings
         const parsedCreated: Technician = {
           ...created,
-          skills: JSON.parse(created.skills || '[]'),
-          certifications: JSON.parse(created.certifications || '[]'),
+          skills: parseSkillsField(created.skills),
           status: created.status as Technician['status'],
         };
         setTechnicians(prev => [...prev, parsedCreated]);
@@ -183,8 +234,7 @@ export default function Technicians() {
         name: '',
         email: '',
         phoneDigits: '',
-        skills: '',
-        certifications: ''
+        skills: ''
       });
       setIsDialogOpen(false);
     } catch (err) {
@@ -197,19 +247,16 @@ export default function Technicians() {
         avatar: '',
         status: 'available',
         skills: newTechnician.skills.split(',').map(s => s.trim()).filter(s => s),
-        certifications: newTechnician.certifications.split(',').map(s => s.trim()).filter(s => s),
         activeTickets: 0,
         resolvedTickets: 0,
         avgResolutionTime: 0,
-        rating: 5.0,
       };
       setTechnicians(prev => [...prev, newTech]);
       setNewTechnician({
         name: '',
         email: '',
         phoneDigits: '',
-        skills: '',
-        certifications: ''
+        skills: ''
       });
       setIsDialogOpen(false);
     } finally {
@@ -217,48 +264,69 @@ export default function Technicians() {
     }
   };
 
-  const fetchAvailableTickets = async () => {
-    try {
-      const response = await fetch('/api/tickets?status=open');
-      if (response.ok) {
-        const tickets = await response.json();
-        setAvailableTickets(tickets.filter((ticket: Ticket) => !ticket.assignedTechnicianId));
-      }
-    } catch (err) {
-      console.error('Failed to fetch available tickets:', err);
-    }
+  const handleEditClick = (tech: Technician) => {
+    const digitsOnly = tech.phone.replace(/\D/g, '');
+    setEditingTechnicianId(tech.id);
+    setEditTechnician({
+      name: tech.name,
+      email: tech.email,
+      phoneDigits: digitsOnly.slice(-10),
+      skills: tech.skills.join(', '),
+    });
+    setIsEditDialogOpen(true);
   };
 
-  const handleAssignTicket = async () => {
-    if (!selectedTicketId || !assigningTech) return;
+  const handleEditTechnician = async () => {
+    if (!editingTechnicianId) return;
+    if (!validateTechnicianForm(editTechnician)) {
+      return;
+    }
+
+    setIsEditSubmitting(true);
+    const parsedSkills = editTechnician.skills.split(',').map(s => s.trim()).filter(Boolean);
+    const technicianData = {
+      name: editTechnician.name.trim(),
+      email: editTechnician.email.trim(),
+      phone: '+91' + editTechnician.phoneDigits,
+      skills: parsedSkills,
+    };
 
     try {
-      const response = await fetch(`/api/tickets/${selectedTicketId}`, {
+      const response = await fetch(`/api/technicians/${editingTechnicianId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assignedTechnicianId: assigningTech.id,
-          status: 'in_progress'
-        }),
+        body: JSON.stringify(technicianData),
       });
 
       if (response.ok) {
-        // Update technician state
+        const updated = await response.json();
         setTechnicians(prev => prev.map(t =>
-          t.id === assigningTech.id
-            ? { ...t, activeTickets: t.activeTickets + 1, status: 'busy' as const }
+          t.id === editingTechnicianId
+            ? {
+                ...t,
+                ...updated,
+                skills: parseSkillsField(updated.skills),
+                status: updated.status as Technician['status'],
+              }
             : t
         ));
-        setAssignDialogOpen(false);
-        setSelectedTicketId(null);
-        setAssigningTech(null);
-        setAvailableTickets([]);
       } else {
-        alert('Failed to assign ticket');
+        alert('Failed to update technician');
       }
     } catch (err) {
-      console.error('Failed to assign ticket:', err);
-      alert('Failed to assign ticket');
+      console.error('Failed to update technician:', err);
+      setTechnicians(prev => prev.map(t =>
+        t.id === editingTechnicianId
+          ? {
+              ...t,
+              ...technicianData,
+            }
+          : t
+      ));
+    } finally {
+      setIsEditSubmitting(false);
+      setIsEditDialogOpen(false);
+      setEditingTechnicianId(null);
     }
   };
 
@@ -332,8 +400,10 @@ export default function Technicians() {
               <Label htmlFor="name">Full Name *</Label>
               <Input
                 id="name"
+                required
+                maxLength={20}
                 value={newTechnician.name}
-                onChange={(e) => setNewTechnician(prev => ({ ...prev, name: e.target.value }))}
+                onChange={(e) => setNewTechnician(prev => ({ ...prev, name: e.target.value.slice(0, 20) }))}
                 placeholder="John Smith"
               />
             </div>
@@ -342,16 +412,18 @@ export default function Technicians() {
               <Input
                 id="email"
                 type="email"
+                required
                 value={newTechnician.email}
                 onChange={(e) => setNewTechnician(prev => ({ ...prev, email: e.target.value }))}
                 placeholder="john.smith@example.com"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="phone">Phone Number (+91)</Label>
+              <Label htmlFor="phone">Phone Number (+91) *</Label>
               <Input
                 id="phone"
                 type="tel"
+                required
                 value={newTechnician.phoneDigits}
                 onChange={(e) => setNewTechnician(prev => ({ ...prev, phoneDigits: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
                 placeholder="Enter 10 digits"
@@ -359,21 +431,13 @@ export default function Technicians() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="skills">Skills (comma-separated)</Label>
+              <Label htmlFor="skills">Skills (comma-separated) *</Label>
               <Input
                 id="skills"
+                required
                 value={newTechnician.skills}
                 onChange={(e) => setNewTechnician(prev => ({ ...prev, skills: e.target.value }))}
                 placeholder="Panel Replacement, Electrical Diagnostics"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="certifications">Certifications (comma-separated)</Label>
-              <Input
-                id="certifications"
-                value={newTechnician.certifications}
-                onChange={(e) => setNewTechnician(prev => ({ ...prev, certifications: e.target.value }))}
-                placeholder="NABCEP PV, OSHA 30"
               />
             </div>
           </div>
@@ -388,52 +452,70 @@ export default function Technicians() {
         </DialogContent>
       </Dialog>
 
-      {/* Assign Ticket Dialog */}
-      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+      {/* Edit Technician Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Assign Ticket to {assigningTech?.name}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5" />
+              Edit Technician
+            </DialogTitle>
             <DialogDescription>
-              Select an available ticket to assign to this technician.
+              Update technician details.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            {availableTickets.length === 0 ? (
-              <p className="text-muted-foreground">No available tickets to assign.</p>
-            ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {availableTickets.map(ticket => (
-                  <div
-                    key={ticket.id}
-                    className={cn(
-                      'p-3 border rounded-lg cursor-pointer hover:bg-accent',
-                      selectedTicketId === ticket.id && 'border-primary bg-accent'
-                    )}
-                    onClick={() => setSelectedTicketId(ticket.id)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">{ticket.ticketNumber}</p>
-                        <p className="text-sm text-muted-foreground">{ticket.description}</p>
-                        <Badge variant="outline" className="mt-1">
-                          {ticket.priority}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">Full Name *</Label>
+              <Input
+                id="edit-name"
+                required
+                maxLength={20}
+                value={editTechnician.name}
+                onChange={(e) => setEditTechnician(prev => ({ ...prev, name: e.target.value.slice(0, 20) }))}
+                placeholder="John Smith"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-email">Email Address *</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                required
+                value={editTechnician.email}
+                onChange={(e) => setEditTechnician(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="john.smith@example.com"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-phone">Phone Number (+91) *</Label>
+              <Input
+                id="edit-phone"
+                type="tel"
+                required
+                value={editTechnician.phoneDigits}
+                onChange={(e) => setEditTechnician(prev => ({ ...prev, phoneDigits: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                placeholder="Enter 10 digits"
+                maxLength={10}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-skills">Skills (comma-separated) *</Label>
+              <Input
+                id="edit-skills"
+                required
+                value={editTechnician.skills}
+                onChange={(e) => setEditTechnician(prev => ({ ...prev, skills: e.target.value }))}
+                placeholder="Panel Replacement, Electrical Diagnostics"
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isEditSubmitting}>
               Cancel
             </Button>
-            <Button
-              onClick={handleAssignTicket}
-              disabled={!selectedTicketId}
-            >
-              Assign Ticket
+            <Button onClick={handleEditTechnician} disabled={isEditSubmitting}>
+              {isEditSubmitting ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -607,10 +689,6 @@ export default function Technicians() {
                           {tech.status}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Star className="h-4 w-4 fill-warning text-warning" />
-                        <span className="text-sm font-medium">{tech.rating.toFixed(1)}</span>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -675,20 +753,6 @@ export default function Technicians() {
                   <Progress value={Math.min(tech.activeTickets * 25, 100)} className="mt-2 h-2" />
                 </div>
 
-                {/* Certifications */}
-                <div className="mt-4 flex flex-wrap gap-1">
-                  {tech.certifications.length > 0 ? (
-                    tech.certifications.map(cert => (
-                      <Badge key={cert} variant="outline" className="text-xs">
-                        <Award className="mr-1 h-3 w-3" />
-                        {cert}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-sm text-muted-foreground">No certifications</span>
-                  )}
-                </div>
-
                 {/* Actions */}
                 <div className="mt-4 flex gap-2">
                   <Button
@@ -701,16 +765,13 @@ export default function Technicians() {
                     Schedule
                   </Button>
                   <Button
+                    variant="outline"
                     size="sm"
                     className="flex-1"
-                    disabled={tech.status === 'offline'}
-                    onClick={() => {
-                      setAssigningTech(tech);
-                      fetchAvailableTickets();
-                      setAssignDialogOpen(true);
-                    }}
+                    onClick={() => handleEditClick(tech)}
                   >
-                    Assign Ticket
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => handleDeleteTechnician(tech.id)}>
                     <Trash2 className="h-4 w-4" />

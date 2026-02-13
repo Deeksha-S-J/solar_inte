@@ -6,7 +6,7 @@ const router = Router();
 // Get all tickets with filtering
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { status, priority, assignedTo } = req.query;
+    const { status, priority } = req.query;
 
     const where: any = {};
 
@@ -18,15 +18,10 @@ router.get('/', async (req: Request, res: Response) => {
       where.priority = priority;
     }
 
-    if (assignedTo) {
-      where.assignedTechnicianId = assignedTo;
-    }
-
     const tickets = await prisma.ticket.findMany({
       where,
       include: {
         panel: { include: { zone: true } },
-        assignedTechnician: true,
         fault: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -47,7 +42,6 @@ router.get('/:id', async (req: Request, res: Response) => {
       where: { id: req.params.id },
       include: {
         panel: { include: { zone: true } },
-        assignedTechnician: true,
         fault: true,
         notes: {
           include: { author: true },
@@ -137,7 +131,7 @@ router.post('/', async (req: Request, res: Response) => {
 // Update ticket
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
-    const { status, assignedTechnicianId, resolutionNotes, resolutionCause, resolutionImageUrl } = req.body;
+    const { status, resolutionNotes, resolutionCause, resolutionImageUrl } = req.body;
 
     const updateData: any = {
       updatedAt: new Date(),
@@ -148,10 +142,6 @@ router.patch('/:id', async (req: Request, res: Response) => {
       if (status === 'resolved' || status === 'closed') {
         updateData.resolvedAt = new Date();
       }
-    }
-
-    if (assignedTechnicianId) {
-      updateData.assignedTechnicianId = assignedTechnicianId;
     }
 
     if (resolutionNotes) {
@@ -170,22 +160,6 @@ router.patch('/:id', async (req: Request, res: Response) => {
       where: { id: req.params.id },
       data: updateData,
     });
-
-    // Update technician stats if assigned
-    if (assignedTechnicianId) {
-      const technician = await prisma.technician.findUnique({
-        where: { id: assignedTechnicianId },
-      });
-      if (technician) {
-        await prisma.technician.update({
-          where: { id: assignedTechnicianId },
-          data: {
-            activeTickets: technician.activeTickets + 1,
-            status: technician.activeTickets + 1 > 0 ? 'busy' : 'available',
-          },
-        });
-      }
-    }
 
     res.json(ticket);
   } catch (error) {

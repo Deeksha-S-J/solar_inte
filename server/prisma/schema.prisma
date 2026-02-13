@@ -55,12 +55,9 @@ model Technician {
   avatar          String?
   status          String
   skills          String
-  certifications  String
   activeTickets   Int       @default(0)
   resolvedTickets Int       @default(0)
   avgResolutionTime Float   @default(0)
-  rating          Float     @default(0)
-  assignedTickets Ticket[]
   notes           TicketNote[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -100,8 +97,6 @@ model Ticket {
   createdAt         DateTime
   updatedAt         DateTime
   resolvedAt        DateTime?
-  assignedTechnician Technician? @relation(fields: [assignedTechnicianId], references: [id])
-  assignedTechnicianId String?
   description       String
   faultType         String
   droneImageUrl     String?
@@ -115,7 +110,6 @@ model Ticket {
 
   @@index([status])
   @@index([priority])
-  @@index([assignedTechnicianId])
 }
 
 model TicketNote {

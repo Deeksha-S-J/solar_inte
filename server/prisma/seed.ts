@@ -96,11 +96,9 @@ async function main() {
           ...tech,
           phone: '+1 (555) 123-4567',
           skills: JSON.stringify(['Panel Maintenance', 'Diagnostics']),
-          certifications: JSON.stringify(['NABCEP PV']),
           activeTickets: Math.floor(Math.random() * 5),
           resolvedTickets: Math.floor(Math.random() * 200),
           avgResolutionTime: 2 + Math.random() * 3,
-          rating: 4 + Math.random(),
         },
       });
       techCreated++;

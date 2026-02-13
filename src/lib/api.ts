@@ -31,11 +31,9 @@ export interface Technician {
   avatar?: string;
   status: 'available' | 'busy' | 'offline';
   skills: string[];
-  certifications: string[];
   activeTickets: number;
   resolvedTickets: number;
   avgResolutionTime: number;
-  rating: number;
 }
 
 export interface Ticket {

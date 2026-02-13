@@ -74,18 +74,20 @@ export interface Technician {
   avatar: string;
   status: 'available' | 'busy' | 'offline';
   skills: string[];
-  certifications: string[];
   activeTickets: number;
   resolvedTickets: number;
   avgResolutionTime: number; // hours
-  rating: number; // 0-5
 }
 
 export interface WeatherData {
+  id?: string;
   temperature: number;
   condition: 'sunny' | 'cloudy' | 'partly-cloudy' | 'rainy' | 'stormy';
   humidity: number;
   sunlightIntensity: number; // 0-100%
+  recordedAt?: string;
+  windSpeed?: number;
+  uvIndex?: number;
   forecast: WeatherForecast[];
 }
 

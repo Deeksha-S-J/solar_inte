@@ -36,7 +36,6 @@ router.get('/:id', async (req: Request, res: Response) => {
       include: {
         panel: { include: { zone: true } },
         tickets: {
-          include: { assignedTechnician: true },
         },
       },
     });
