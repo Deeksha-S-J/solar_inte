@@ -3,6 +3,7 @@ import prisma from '../db.js';
 
 const router = Router();
 const DEVICE_ONLINE_THRESHOLD_MS = 30 * 1000;
+const WEATHER_WRITE_INTERVAL_MS = 30 * 1000;
 const MIN_HEALTHY_PANEL_VOLTAGE = Number(process.env.MIN_HEALTHY_PANEL_VOLTAGE || 6);
 const MIN_WARNING_PANEL_VOLTAGE = Number(process.env.MIN_WARNING_PANEL_VOLTAGE || 4.5);
 
@@ -456,13 +457,25 @@ router.get('/:id', async (req: Request, res: Response) => {
 // Receive sensor data from ESP32
 router.post('/sensor-update', async (req: Request, res: Response) => {
   try {
-    const { device_id } = req.body;
+    const { device_id, temperature, humidity } = req.body;
     const voltage = parseNumber(req.body?.voltage);
     const current = parseNumber(req.body?.current);
     const power = parseNumber(req.body?.power);
+    const temperatureValue = parseNumber(temperature);
+    const humidityValue = parseNumber(humidity);
 
-    if (!device_id || !Number.isFinite(voltage) || !Number.isFinite(current) || !Number.isFinite(power)) {
-      return res.status(400).json({ error: 'Missing required fields: device_id, voltage, current, power' });
+    if (
+      !device_id ||
+      !Number.isFinite(voltage) ||
+      !Number.isFinite(current) ||
+      !Number.isFinite(power) ||
+      !Number.isFinite(temperatureValue) ||
+      !Number.isFinite(humidityValue)
+    ) {
+      return res.status(400).json({
+        error:
+          'Missing required fields: device_id, voltage, current, power, temperature, humidity',
+      });
     }
 
     const panelIds = deviceToPanelMap[device_id];
@@ -479,6 +492,55 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
     }
 
     const now = new Date();
+
+    // --- Create WeatherData Entry ---
+    const totalMaxOutputW = panels.reduce((sum, p) => sum + p.maxOutput, 0);
+    const currentPowerW = power / 1000;
+    const sunlightIntensity =
+      totalMaxOutputW > 0
+        ? Math.min(100, (currentPowerW / totalMaxOutputW) * 100)
+        : 0;
+
+    let condition: 'sunny' | 'cloudy' | 'partly-cloudy' | 'rainy' | 'stormy' = 'sunny';
+    if (power <= 0) {
+      condition = 'cloudy';
+    } else if (humidityValue >= 85) {
+      condition = 'cloudy';
+    } else if (humidityValue >= 70) {
+      condition = 'partly-cloudy';
+    }
+
+    let weatherData;
+    try {
+      const latestWeather = await prisma.weatherData.findFirst({
+        orderBy: { recordedAt: 'desc' },
+      });
+      const shouldWriteWeather =
+        !latestWeather ||
+        now.getTime() - new Date(latestWeather.recordedAt).getTime() >= WEATHER_WRITE_INTERVAL_MS;
+      if (shouldWriteWeather) {
+        const roundedTemperature = Math.round(temperatureValue * 100) / 100;
+        weatherData = await prisma.weatherData.create({
+          data: {
+            temperature: roundedTemperature,
+            humidity: humidityValue,
+            condition,
+            sunlightIntensity,
+            recordedAt: now,
+          },
+        });
+      } else {
+        weatherData = latestWeather ?? undefined;
+      }
+    } catch (e: any) {
+      // Ignore unique constraint violation if a reading for this exact timestamp already exists
+      if (e?.code !== 'P2002') {
+        throw e;
+      }
+      console.warn(`WeatherData record for ${now.toISOString()} already exists.`)
+    }
+    // --- End WeatherData ---
+
     const espDevice = await prisma.espDevice.upsert({
       where: { deviceId: device_id },
       update: {
@@ -518,7 +580,8 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
 
       let status = 'healthy';
       if (voltagePerPanel < MIN_WARNING_PANEL_VOLTAGE) status = 'fault';
-      else if (voltagePerPanel < MIN_HEALTHY_PANEL_VOLTAGE || powerPerPanelW <= 0) status = 'warning';
+      else if (voltagePerPanel < MIN_HEALTHY_PANEL_VOLTAGE || powerPerPanelW <= 0)
+        status = 'warning';
 
       const updatedPanel = await prisma.solarPanel.update({
         where: { id: panel.id },
@@ -553,6 +616,7 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
       success: true,
       message: `${panelCount} panels updated from ${device_id}`,
       device: device_id,
+      weather: weatherData,
       panelCount,
       totalInput: {
         voltage,

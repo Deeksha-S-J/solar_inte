@@ -7,6 +7,7 @@ const router = Router();
 // Default location: Bangalore, India (postal code 560098)
 const DEFAULT_LAT = 12.9719;
 const DEFAULT_LON = 77.5937;
+const SENSOR_WEATHER_MAX_AGE_MS = Number(process.env.SENSOR_WEATHER_MAX_AGE_MS ?? 10 * 60 * 1000);
 
 // Map Open-Meteo weather codes to our app's conditions
 const mapWeatherCode = (code: number): string => {
@@ -199,25 +200,35 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 // Get current weather
 router.get('/current', async (_req: Request, res: Response) => {
   try {
+    const latestSensorWeather = await prisma.weatherData.findFirst({
+      orderBy: { recordedAt: 'desc' },
+    });
+
+    if (latestSensorWeather) {
+      const ageMs = Date.now() - new Date(latestSensorWeather.recordedAt).getTime();
+      if (ageMs <= SENSOR_WEATHER_MAX_AGE_MS) {
+        res.json({
+          ...latestSensorWeather,
+          windSpeed: 0,
+          cloudCover: 0,
+          uvIndex: Math.max(1, Math.round((100 - latestSensorWeather.sunlightIntensity) / 10)),
+          forecast: [],
+          source: 'esp32',
+        });
+        return;
+      }
+    }
+
     // Try to fetch real weather data from Open-Meteo
     const meteoData = await fetchOpenMeteoData();
     
-    let weather;
-    
     if (meteoData) {
-      // Use real weather data from Open-Meteo
-      weather = await prisma.weatherData.create({
-        data: {
-          temperature: meteoData.temperature,
-          condition: meteoData.condition,
-          humidity: meteoData.humidity,
-          sunlightIntensity: meteoData.sunlightIntensity,
-          recordedAt: new Date(),
-        },
-      });
-      
       res.json({
-        ...weather,
+        temperature: meteoData.temperature,
+        condition: meteoData.condition,
+        humidity: meteoData.humidity,
+        sunlightIntensity: meteoData.sunlightIntensity,
+        recordedAt: new Date().toISOString(),
         windSpeed: meteoData.windSpeed,
         cloudCover: meteoData.cloudCover,
         uvIndex: Math.max(1, Math.round((100 - meteoData.sunlightIntensity) / 10)),
@@ -246,16 +257,6 @@ router.get('/current', async (_req: Request, res: Response) => {
     const conditions = nextSun > 70 ? ['sunny'] : nextSun > 40 ? ['partly-cloudy', 'sunny'] : ['cloudy', 'partly-cloudy'];
     const randomCondition = conditions[Math.floor(Math.random() * conditions.length)];
 
-    weather = await prisma.weatherData.create({
-      data: {
-        temperature: nextTemp,
-        condition: randomCondition,
-        humidity: nextHumidity,
-        sunlightIntensity: nextSun,
-        recordedAt: new Date(),
-      },
-    });
-
     // Generate synthetic hourly forecast for all hours
     const syntheticForecast = [];
     for (let h = 0; h <= 23; h++) {
@@ -271,7 +272,11 @@ router.get('/current', async (_req: Request, res: Response) => {
     }
 
     res.json({
-      ...weather,
+      temperature: nextTemp,
+      condition: randomCondition,
+      humidity: nextHumidity,
+      sunlightIntensity: nextSun,
+      recordedAt: new Date().toISOString(),
       windSpeed: clamp(Math.round(8 + Math.random() * 12), 3, 25),
       uvIndex: isDaytime ? Math.max(1, Math.round(nextSun / 12)) : 0,
       forecast: syntheticForecast,
@@ -374,6 +379,34 @@ router.get('/forecast', async (_req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching forecast:', error);
     res.status(500).json({ error: 'Failed to fetch weather forecast' });
+  }
+});
+
+// Get Open-Meteo current weather (for UI tile)
+router.get('/open-meteo', async (_req: Request, res: Response) => {
+  try {
+    const meteoData = await fetchOpenMeteoData();
+    if (!meteoData) {
+      return res.status(503).json({ error: 'Open-Meteo unavailable' });
+    }
+
+    res.json({
+      temperature: meteoData.temperature,
+      condition: meteoData.condition,
+      humidity: meteoData.humidity,
+      sunlightIntensity: meteoData.sunlightIntensity,
+      recordedAt: new Date().toISOString(),
+      windSpeed: meteoData.windSpeed,
+      cloudCover: meteoData.cloudCover,
+      uvIndex: Math.max(1, Math.round((100 - meteoData.sunlightIntensity) / 10)),
+      forecast: meteoData.forecast || [],
+      source: 'open-meteo',
+      description: meteoData.description,
+      weatherCode: meteoData.weatherCode,
+    });
+  } catch (error) {
+    console.error('Error fetching Open-Meteo weather:', error);
+    res.status(500).json({ error: 'Failed to fetch Open-Meteo weather' });
   }
 });
 

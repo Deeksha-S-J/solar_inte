@@ -116,6 +116,7 @@ const defaultAnalytics: DashboardAnalytics = {
 interface DashboardData {
   metrics: DashboardMetrics;
   weather: WeatherData;
+  openMeteoWeather: WeatherData | null;
   analytics: DashboardAnalytics;
 }
 
@@ -203,6 +204,7 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData>({
     metrics: defaultMetrics,
     weather: defaultWeather,
+    openMeteoWeather: null,
     analytics: defaultAnalytics,
   });
   const [loading, setLoading] = useState(true);
@@ -243,13 +245,17 @@ export default function Dashboard() {
       try {
         console.log('📊 [Dashboard] Fetching metrics from /api/analytics/dashboard');
         // Fetch all data with individual timeouts
-        const [metricsRes, weatherRes, powerDailyRes, powerWeeklyRes, powerMonthlyRes, liveStatusRes] = await Promise.all([
+        const [metricsRes, weatherRes, openMeteoRes, powerDailyRes, powerWeeklyRes, powerMonthlyRes, liveStatusRes] = await Promise.all([
           fetchWithTimeout('/api/analytics/dashboard', 10000).catch(e => {
             console.error('❌ Metrics fetch failed:', e);
             return { ok: false } as Response;
           }),
           fetchWithTimeout('/api/weather/current', 10000).catch(e => {
             console.error('❌ Weather fetch failed:', e);
+            return { ok: false } as Response;
+          }),
+          fetchWithTimeout('/api/weather/open-meteo', 10000).catch(e => {
+            console.error('Open-Meteo fetch failed:', e);
             return { ok: false } as Response;
           }),
           fetchWithTimeout('/api/analytics/power?period=daily', 10000).catch(e => {
@@ -313,6 +319,22 @@ export default function Dashboard() {
             };
           } catch (e) {
             console.warn('Failed to parse weather response:', e);
+          }
+        }
+
+        let openMeteoWeather: WeatherData | null = null;
+        if (openMeteoRes.ok) {
+          try {
+            const openMeteoApi = await openMeteoRes.json();
+            openMeteoWeather = {
+              ...openMeteoApi,
+              windSpeed: openMeteoApi.windSpeed || 0,
+              uvIndex: Math.floor((openMeteoApi.sunlightIntensity || 0) / 10),
+              forecast: openMeteoApi.forecast || [],
+            };
+          } catch (e) {
+            console.warn('Failed to parse Open-Meteo response:', e);
+            openMeteoWeather = null;
           }
         }
 
@@ -404,6 +426,7 @@ export default function Dashboard() {
         setData({
           metrics: mergedMetrics,
           weather,
+          openMeteoWeather,
           analytics: {
             powerGeneration: {
               daily: dailyPowerForChart,
@@ -451,7 +474,7 @@ export default function Dashboard() {
     );
   }
 
-  const { metrics, weather, analytics } = data;
+  const { metrics, weather, openMeteoWeather, analytics } = data;
 
   return (
     <div className="space-y-6">
@@ -596,11 +619,10 @@ export default function Dashboard() {
 
         {/* Right Column - Weather */}
         <div className="space-y-6">
-          <WeatherWidget weather={weather} />
+          <WeatherWidget weather={weather} openMeteoWeather={openMeteoWeather} />
         </div>
       </div>
 
     </div>
   );
 }
-
