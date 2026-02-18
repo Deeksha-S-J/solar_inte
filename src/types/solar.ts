@@ -2,6 +2,20 @@
 
 export type PanelStatus = 'healthy' | 'warning' | 'fault' | 'offline';
 
+export interface Alert {
+  id: string;
+  alertId?: string | null;  // ALERT ID-AK-001 format
+  zone: string;
+  row: number;
+  status: 'warning' | 'fault';
+  message?: string;
+  dismissed: boolean;
+  scanId?: string;
+  ticketId?: string;
+  createdAt: string;
+  dismissedAt?: string;
+}
+
 export interface SolarPanel {
   id: string;
   row: number;
@@ -21,11 +35,12 @@ export interface SolarPanel {
 export interface FaultDetection {
   id: string;
   panelId: string;
+  panelRow?: number; // Row number from the panel
   detectedAt: Date;
   severity: 'low' | 'medium' | 'high' | 'critical';
   faultType: string;
-  droneImageUrl: string;
-  thermalImageUrl: string;
+  droneImageUrl?: string; // Optional - for initial alerts this may be empty
+  thermalImageUrl?: string; // Optional - for initial alerts this may be empty
   aiConfidence: number; // 0-100%
   aiAnalysis: string;
   recommendedAction: string;

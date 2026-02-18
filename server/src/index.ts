@@ -6,7 +6,7 @@ import { Server } from 'socket.io';
 import prisma from './db.js';
 import path from 'path';
 import fs from 'fs';
-import { createClient } from '@supabase/supabase-js';
+import { createFaultTicketAndAssignment, generateIncidentId, normalizeSeverity, generateTicketNumber } from './routes/automation.js';
 
 // Routes
 import panelsRouter from './routes/panels.js';
@@ -16,6 +16,10 @@ import faultsRouter from './routes/faults.js';
 import weatherRouter from './routes/weather.js';
 import analyticsRouter from './routes/analytics.js';
 import solarScansRouter from './routes/solarScans.js';
+import automationRouter from './routes/automation.js';
+import espRouter from './routes/esp.js';
+import webhookRouter from './routes/webhook.js';
+import alertsRouter from './routes/alerts.js';
 
 dotenv.config();
 
@@ -31,15 +35,6 @@ const io = new Server(httpServer, {
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_PI_RESULTS = 50;
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
-const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'solar-images';
-const USE_SUPABASE_STORAGE = process.env.USE_SUPABASE_STORAGE !== 'false';
-
-const supabase =
-  USE_SUPABASE_STORAGE && SUPABASE_URL && SUPABASE_ANON_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
 
 // Directory to save received images from Pi
 const PI_SAVE_DIR = path.join(process.cwd(), 'received_from_pi');
@@ -77,10 +72,6 @@ type PiAnalysisResultInput = {
     summary?: string;
     root_cause?: string;
     impact_assessment?: string;
-    source?: string;
-    baseline_aware?: boolean;
-    deviation_from_baseline?: string;
-    genai_insights?: string;
   };
   rgb_stats?: {
     total?: number;
@@ -90,24 +81,12 @@ type PiAnalysisResultInput = {
   frame_b64?: string;
   thermal_b64?: string;
   thermal?: {
-    fault?: string;
     min_temp?: number;
     max_temp?: number;
     mean_temp?: number;
     delta?: number;
     risk_score?: number;
     severity?: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW';
-    baseline_delta?: number | null;
-  };
-  thermal_stats?: {
-    fault?: string;
-    min_temp?: number;
-    max_temp?: number;
-    mean_temp?: number;
-    delta?: number;
-    risk_score?: number;
-    severity?: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW';
-    baseline_delta?: number | null;
   };
   panel_crops?: PiPanelCropInput[];
   device_id?: string;
@@ -127,10 +106,6 @@ type PiResultForClients = {
     summary: string;
     root_cause: string;
     impact_assessment: string;
-    source?: string;
-    baseline_aware?: boolean;
-    deviation_from_baseline?: string;
-    genai_insights?: string;
   };
   rgb_stats: {
     total: number;
@@ -140,24 +115,12 @@ type PiResultForClients = {
   main_image_web: string | null;
   thermal_image_web: string | null;
   thermal: {
-    fault: string | null;
     min_temp: number | null;
     max_temp: number | null;
     mean_temp: number | null;
     delta: number | null;
     risk_score: number | null;
     severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | null;
-    baseline_delta: number | null;
-  };
-  thermal_stats: {
-    fault: string | null;
-    min_temp: number | null;
-    max_temp: number | null;
-    mean_temp: number | null;
-    delta: number | null;
-    risk_score: number | null;
-    severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | null;
-    baseline_delta: number | null;
   };
   panel_crops: Array<{
     panel_number: string;
@@ -183,37 +146,6 @@ const decodeBase64Image = (rawData: string) => {
   return Buffer.from(base64Data, 'base64');
 };
 
-const uploadBase64ToSupabase = async (
-  rawData: string,
-  folder: 'rgb' | 'thermal',
-  fileName: string
-): Promise<string | null> => {
-  if (!supabase) return null;
-
-  try {
-    const buffer = decodeBase64Image(rawData);
-    const objectPath = `${folder}/${fileName}`;
-
-    const { error } = await supabase.storage
-      .from(SUPABASE_BUCKET)
-      .upload(objectPath, buffer, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
-
-    if (error) {
-      console.error(`Supabase upload failed [${objectPath}]:`, error.message);
-      return null;
-    }
-
-    const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath);
-    return data?.publicUrl || null;
-  } catch (error) {
-    console.error('Supabase upload exception:', error);
-    return null;
-  }
-};
-
 const getSeverityFromHealthScore = (healthScore: number): 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' => {
   if (healthScore < 30) return 'CRITICAL';
   if (healthScore < 50) return 'HIGH';
@@ -234,6 +166,10 @@ app.use('/api/faults', faultsRouter);
 app.use('/api/weather', weatherRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/solar-scans', solarScansRouter);
+app.use('/api/automation', automationRouter);
+app.use('/api/esp', espRouter);
+app.use('/api/webhook', webhookRouter);
+app.use('/api/alerts', alertsRouter);
 
 app.get('/api/pi-results', (_req, res) => {
   res.json({
@@ -269,6 +205,51 @@ io.on('connection', (socket) => {
     try {
       console.log('Received thermal image from Pi:', data.panelId);
 
+      // Check for duplicate fault within the deduplication window
+      const DEDUPE_WINDOW_MINUTES = 15;
+      const dedupeFrom = new Date(Date.now() - DEDUPE_WINDOW_MINUTES * 60 * 1000);
+      
+      // Get the panel to find its row
+      const panel = await prisma.solarPanel.findUnique({
+        where: { id: data.panelId },
+        select: { id: true, row: true },
+      });
+
+      if (!panel) {
+        socket.emit('image-received', {
+          success: false,
+          error: 'Panel not found',
+        });
+        return;
+      }
+
+      // Check for existing faults in the SAME ROW within the deduplication window
+      // Get all panels in the same row
+      const panelsInRow = await prisma.solarPanel.findMany({
+        where: { row: panel.row },
+        select: { id: true },
+      });
+      const panelIdsInRow = panelsInRow.map(p => p.id);
+
+      const existingFault = await prisma.faultDetection.findFirst({
+        where: {
+          panelId: { in: panelIdsInRow },
+          detectedAt: { gte: dedupeFrom },
+        },
+        orderBy: { detectedAt: 'desc' },
+      });
+
+      if (existingFault) {
+        console.log('⚠️ Duplicate fault detected for row', panel.row, '- skipping creation');
+        socket.emit('image-received', {
+          success: true,
+          panelId: data.panelId,
+          message: 'Duplicate fault detected for row - alert already exists',
+          existingFaultId: existingFault.id,
+        });
+        return;
+      }
+
       // Create fault detection record
       const faultDetection = await prisma.faultDetection.create({
         data: {
@@ -287,7 +268,9 @@ io.on('connection', (socket) => {
       });
 
       // Create a ticket for this fault
-      const ticketNumber = `TKT-${Date.now()}`;
+      // Use generateTicketNumber from automation.ts for FK-XXX format
+      const ticketNumber = await generateTicketNumber();
+      
       await prisma.ticket.create({
         data: {
           ticketNumber,
@@ -362,30 +345,22 @@ io.on('connection', (socket) => {
 
       if (data.frame_b64) {
         const captureFileName = `capture_${safeCaptureId}_${timestampSuffix}.jpg`;
-        mainImageWebPath = await uploadBase64ToSupabase(data.frame_b64, 'rgb', captureFileName);
-
-        if (!mainImageWebPath) {
-          const captureFilePath = path.join(CAPTURES_DIR, captureFileName);
-          fs.writeFileSync(captureFilePath, decodeBase64Image(data.frame_b64));
-          mainImageWebPath = `/api/pi-images/captures/${captureFileName}`;
-        }
+        const captureFilePath = path.join(CAPTURES_DIR, captureFileName);
+        fs.writeFileSync(captureFilePath, decodeBase64Image(data.frame_b64));
+        mainImageWebPath = `/api/pi-images/captures/${captureFileName}`;
       }
 
       if (data.thermal_b64) {
         const thermalFileName = `thermal_${safeCaptureId}_${timestampSuffix}.jpg`;
-        thermalImageWebPath = await uploadBase64ToSupabase(data.thermal_b64, 'thermal', thermalFileName);
-
-        if (!thermalImageWebPath) {
-          const thermalFilePath = path.join(CAPTURES_DIR, thermalFileName);
-          fs.writeFileSync(thermalFilePath, decodeBase64Image(data.thermal_b64));
-          thermalImageWebPath = `/api/pi-images/captures/${thermalFileName}`;
-        }
+        const thermalFilePath = path.join(CAPTURES_DIR, thermalFileName);
+        fs.writeFileSync(thermalFilePath, decodeBase64Image(data.thermal_b64));
+        thermalImageWebPath = `/api/pi-images/captures/${thermalFileName}`;
       }
 
       const panelCropsInput = Array.isArray(data.panel_crops) ? data.panel_crops : [];
       const panelCropsForClients: PiResultForClients['panel_crops'] = [];
 
-      for (const [index, crop] of panelCropsInput.entries()) {
+      panelCropsInput.forEach((crop, index) => {
         const panelNumber = crop.panel_number ?? `P${index + 1}`;
         const status = crop.status ?? 'UNKNOWN';
         const hasDust = crop.has_dust ?? status === 'DUSTY';
@@ -393,13 +368,9 @@ io.on('connection', (socket) => {
 
         if (crop.image_b64) {
           const cropFileName = `panel_${sanitizeFilePart(panelNumber)}_cap${safeCaptureId}_${timestampSuffix}.jpg`;
-          webPath = await uploadBase64ToSupabase(crop.image_b64, 'rgb', cropFileName);
-
-          if (!webPath) {
-            const cropFilePath = path.join(PANEL_CROPS_DIR, cropFileName);
-            fs.writeFileSync(cropFilePath, decodeBase64Image(crop.image_b64));
-            webPath = `/api/pi-images/panel_crops/${cropFileName}`;
-          }
+          const cropFilePath = path.join(PANEL_CROPS_DIR, cropFileName);
+          fs.writeFileSync(cropFilePath, decodeBase64Image(crop.image_b64));
+          webPath = `/api/pi-images/panel_crops/${cropFileName}`;
         }
 
         panelCropsForClients.push({
@@ -408,23 +379,21 @@ io.on('connection', (socket) => {
           has_dust: hasDust,
           web_path: webPath,
         });
-      }
+      });
 
       const dustyPanelCount =
         data.rgb_stats?.dusty ?? panelCropsForClients.filter((crop) => crop.status === 'DUSTY').length;
       const cleanPanelCount =
         data.rgb_stats?.clean ?? panelCropsForClients.filter((crop) => crop.status === 'CLEAN').length;
       const totalPanels = data.rgb_stats?.total ?? panelCropsForClients.length;
-      const thermalData = data.thermal_stats ?? data.thermal;
-      const severity = thermalData?.severity ?? getSeverityFromHealthScore(healthScore);
+      const severity =
+        data.thermal?.severity ?? getSeverityFromHealthScore(healthScore);
       const riskScore =
-        thermalData?.risk_score ?? Math.max(0, Math.min(100, Math.round(100 - healthScore)));
-      const thermalFault = thermalData?.fault ?? null;
-      const thermalMinTemp = thermalData?.min_temp ?? null;
-      const thermalMaxTemp = thermalData?.max_temp ?? null;
-      const thermalMeanTemp = thermalData?.mean_temp ?? null;
-      const thermalDelta = thermalData?.delta ?? null;
-      const thermalBaselineDelta = thermalData?.baseline_delta ?? null;
+        data.thermal?.risk_score ?? Math.max(0, Math.min(100, Math.round(100 - healthScore)));
+      const thermalMinTemp = data.thermal?.min_temp ?? null;
+      const thermalMaxTemp = data.thermal?.max_temp ?? null;
+      const thermalMeanTemp = data.thermal?.mean_temp ?? null;
+      const thermalDelta = data.thermal?.delta ?? null;
 
       const savedScan = await prisma.solarScan.create({
         data: {
@@ -474,10 +443,6 @@ io.on('connection', (socket) => {
           summary: data.report.summary ?? '',
           root_cause: data.report.root_cause ?? '',
           impact_assessment: data.report.impact_assessment ?? '',
-          source: data.report.source ?? '',
-          baseline_aware: data.report.baseline_aware ?? false,
-          deviation_from_baseline: data.report.deviation_from_baseline ?? '',
-          genai_insights: data.report.genai_insights ?? '',
         },
         rgb_stats: {
           total: totalPanels,
@@ -487,24 +452,12 @@ io.on('connection', (socket) => {
         main_image_web: mainImageWebPath,
         thermal_image_web: thermalImageWebPath,
         thermal: {
-          fault: thermalFault,
           min_temp: thermalMinTemp,
           max_temp: thermalMaxTemp,
           mean_temp: thermalMeanTemp,
           delta: thermalDelta,
           risk_score: riskScore,
           severity,
-          baseline_delta: thermalBaselineDelta,
-        },
-        thermal_stats: {
-          fault: thermalFault,
-          min_temp: thermalMinTemp,
-          max_temp: thermalMaxTemp,
-          mean_temp: thermalMeanTemp,
-          delta: thermalDelta,
-          risk_score: riskScore,
-          severity,
-          baseline_delta: thermalBaselineDelta,
         },
         panel_crops: panelCropsForClients,
       };
@@ -516,6 +469,131 @@ io.on('connection', (socket) => {
 
       io.emit('new_result', resultForClients);
       io.emit('new-solar-scan', { scanId: savedScan.id, source: 'pi_analysis_result' });
+
+      // =====================================================
+      // AUTOMATIC TICKET CREATION & TECHNICIAN ASSIGNMENT
+      // Trigger automation for medium+ severity, dusty panels, or faulty panels
+      // =====================================================
+      const AUTO_TICKET_THRESHOLD = 3;
+      const normalizedSeverity = normalizeSeverity(severity); // This converts MODERATE->medium, CRITICAL->critical, etc.
+      const hasFaulty = panelCropsForClients.some((crop) => crop.status === 'FAULTY');
+      const shouldAutoCreateTicket =
+        normalizedSeverity === 'critical' ||
+        normalizedSeverity === 'high' ||
+        normalizedSeverity === 'medium' ||
+        dustyPanelCount >= AUTO_TICKET_THRESHOLD ||
+        hasFaulty;
+
+      if (shouldAutoCreateTicket) {
+        // Update scan status to processing
+        await prisma.solarScan.update({
+          where: { id: savedScan.id },
+          data: { status: 'processing', updatedAt: new Date() }
+        });
+        
+        // Schedule automation to run after 3 seconds
+        setTimeout(async () => {
+          try {
+            // Find a panel to associate with this scan
+            const panel = await prisma.solarPanel.findFirst({
+              where: { status: { not: 'offline' } },
+              orderBy: { lastChecked: 'desc' }
+            });
+
+            if (panel) {
+              const incidentId = generateIncidentId();
+              const derivedFaultType = hasFaulty
+                ? 'thermal_fault'
+                : dustyPanelCount >= AUTO_TICKET_THRESHOLD
+                ? 'dust_accumulation'
+                : 'scan_anomaly';
+
+              // Check for duplicate fault within the deduplication window BEFORE creating
+              // Check at ROW level, not panel level - one alert per row
+              const DEDUPE_WINDOW_MINUTES = 15;
+              const dedupeFrom = new Date(Date.now() - DEDUPE_WINDOW_MINUTES * 60 * 1000);
+              
+              // Get all panels in the same row as this panel
+              const panelsInRow = await prisma.solarPanel.findMany({
+                where: { row: panel.row },
+                select: { id: true },
+              });
+              const panelIdsInRow = panelsInRow.map(p => p.id);
+              
+              const existingFault = await prisma.faultDetection.findFirst({
+                where: {
+                  panelId: { in: panelIdsInRow },
+                  detectedAt: { gte: dedupeFrom },
+                },
+                orderBy: { detectedAt: 'desc' },
+              });
+
+              if (existingFault) {
+                console.log('⚠️ Duplicate fault detected for row', panel.row, '- skipping ticket creation');
+                
+                // Update scan status to processed without creating new ticket
+                await prisma.solarScan.update({
+                  where: { id: savedScan.id },
+                  data: { status: 'processed', updatedAt: new Date() }
+                });
+                
+                // Delete the scan since we don't need a new ticket
+                await prisma.solarScan.delete({
+                  where: { id: savedScan.id }
+                });
+                return;
+              }
+
+              const automationResult = await createFaultTicketAndAssignment({
+                incidentId,
+                panelId: panel.id,
+                faultType: derivedFaultType,
+                severity: normalizedSeverity,
+                detectedAt: savedScan.timestamp,
+                description: `Automated scan processing - ${
+                  hasFaulty
+                    ? 'thermal fault detected'
+                    : 'dust accumulation: ' + dustyPanelCount + ' panels'
+                }`,
+                aiConfidence: Math.max(0, Math.min(100, riskScore)),
+                aiAnalysis: `Scan severity: ${severity}; dusty panels: ${dustyPanelCount}; faulty detections: ${
+                  hasFaulty ? 'yes' : 'no'
+                }`,
+                recommendedAction: hasFaulty
+                  ? 'Immediate technician dispatch for thermal fault verification'
+                  : 'Schedule panel cleaning and technician validation',
+                droneImageUrl: mainImageWebPath || undefined,
+                thermalImageUrl: thermalImageWebPath || undefined,
+                locationX: 0,
+                locationY: 0,
+                scanId: savedScan.id,
+              });
+
+              // Update scan status to processed
+              await prisma.solarScan.update({
+                where: { id: savedScan.id },
+                data: { status: 'processed', updatedAt: new Date() }
+              });
+
+              console.log(
+                '✅ Automation triggered (3s delay): Ticket',
+                automationResult.ticketNumber,
+                'assigned to technician'
+              );
+              
+              // Delete the scan after ticket creation - it now lives in tickets only
+              await prisma.solarScan.delete({
+                where: { id: savedScan.id }
+              });
+              console.log('🗑️ Scan removed from scans list - now visible in tickets only');
+            } else {
+              console.log('⚠️ No panel found for automation - scan saved but no ticket created');
+            }
+          } catch (autoError) {
+            console.error('❌ Automation error:', autoError);
+          }
+        }, 3000); // 3 second delay
+      }
 
       const response = {
         success: true,

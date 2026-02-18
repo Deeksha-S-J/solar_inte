@@ -2,7 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
-interface PanelHealthProps {
+interface RowData {
+  zone: string;
+  row: number;
   healthy: number;
   warning: number;
   fault: number;
@@ -10,24 +12,38 @@ interface PanelHealthProps {
   total: number;
 }
 
-export function PanelHealthOverview({ healthy, warning, fault, offline, total }: PanelHealthProps) {
-  const safeTotal = total > 0 ? total : 1;
-  const healthyPercent = (healthy / safeTotal) * 100;
-  const warningPercent = (warning / safeTotal) * 100;
-  const faultPercent = (fault / safeTotal) * 100;
-  const offlinePercent = (offline / safeTotal) * 100;
+interface Totals {
+  healthy: number;
+  warning: number;
+  fault: number;
+  offline: number;
+  total: number;
+}
+
+interface PanelHealthProps {
+  rows: RowData[];
+  totals: Totals;
+  activeDeviceIds?: string[];
+}
+
+export function PanelHealthOverview({ rows, totals, activeDeviceIds = [] }: PanelHealthProps) {
+  const safeTotal = totals.total > 0 ? totals.total : 1;
+  const healthyPercent = (totals.healthy / safeTotal) * 100;
+  const warningPercent = (totals.warning / safeTotal) * 100;
+  const faultPercent = (totals.fault / safeTotal) * 100;
+  const offlinePercent = (totals.offline / safeTotal) * 100;
 
   const segments = [
-    { label: 'Healthy', count: healthy, percent: healthyPercent, color: 'bg-success' },
-    { label: 'Warning', count: warning, percent: warningPercent, color: 'bg-warning' },
-    { label: 'Fault', count: fault, percent: faultPercent, color: 'bg-destructive' },
-    { label: 'Offline', count: offline, percent: offlinePercent, color: 'bg-muted-foreground' },
+    { label: 'Healthy', count: totals.healthy, percent: healthyPercent, color: 'bg-success' },
+    { label: 'Warning', count: totals.warning, percent: warningPercent, color: 'bg-warning' },
+    { label: 'Fault', count: totals.fault, percent: faultPercent, color: 'bg-destructive' },
+    { label: 'Offline', count: totals.offline, percent: offlinePercent, color: 'bg-muted-foreground' },
   ];
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg">Panel Health Overview</CardTitle>
+        <CardTitle className="text-lg">Row Health Overview</CardTitle>
       </CardHeader>
       <CardContent>
         {/* Stacked progress bar */}
@@ -68,3 +84,4 @@ export function PanelHealthOverview({ healthy, warning, fault, offline, total }:
     </Card>
   );
 }
+

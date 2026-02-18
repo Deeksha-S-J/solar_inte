@@ -146,38 +146,53 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
 // Delete technician
 router.delete('/:id', async (req: Request, res: Response) => {
-  try {
-    const technicianId = req.params.id;
+  const technicianId = req.params.id;
 
+  try {
+    // Check if technician exists
     const technician = await prisma.technician.findUnique({
       where: { id: technicianId },
-      select: { id: true },
+      select: { id: true, email: true },
     });
 
     if (!technician) {
       return res.status(404).json({ error: 'Technician not found' });
     }
 
-    await prisma.$transaction([
-      prisma.ticketNote.deleteMany({
+    // Use a transaction to ensure all operations succeed or fail together
+    await prisma.$transaction(async (tx) => {
+      // 1. Unassign all tickets assigned to this technician
+      await tx.ticket.updateMany({
+        where: { assignedTechnicianId: technicianId },
+        data: { assignedTechnicianId: null },
+      });
+
+      // 2. Delete all notes created by this technician
+      await tx.ticketNote.deleteMany({
         where: { authorId: technicianId },
-      }),
-      prisma.technician.delete({
+      });
+
+      // 3. Delete the technician
+      await tx.technician.delete({
         where: { id: technicianId },
-      }),
-    ]);
+      });
+    });
 
     res.status(204).send();
   } catch (error: unknown) {
     console.error('Error deleting technician:', error);
+    
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2003') {
-        return res.status(400).json({ error: 'Technician cannot be deleted because related records still exist' });
+        return res.status(400).json({ 
+          error: 'Cannot delete technician. There are still related records in the system.' 
+        });
       }
       if (error.code === 'P2025') {
         return res.status(404).json({ error: 'Technician not found' });
       }
     }
+    
     res.status(500).json({ error: 'Failed to delete technician' });
   }
 });

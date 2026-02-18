@@ -1,0 +1,151 @@
+{
+  "testCases": [
+    {
+      "name": "CRITICAL Hotspot",
+      "description": "Critical thermal hotspot - should create ticket immediately",
+      "payload": {
+        "panelId": "PNL-A0101",
+        "severity": "CRITICAL",
+        "faultType": "Hotspot",
+        "description": "Thermal hotspot detected - temperature above 85°C",
+        "temperature": 87.5,
+        "confidence": 95.5,
+        "location": "Zone A, Row 1"
+      }
+    },
+    {
+      "name": "HIGH Dirty Panel",
+      "description": "High severity dirty panel - efficiency impact",
+      "payload": {
+        "panelId": "PNL-B0205",
+        "severity": "HIGH",
+        "faultType": "Dirty Panel",
+        "description": "Significant dust accumulation detected - efficiency drop of 15%"
+      }
+    },
+    {
+      "name": "MEDIUM Shading",
+      "description": "Medium severity shading issue",
+      "payload": {
+        "panelId": "PNL-C0312",
+        "severity": "MEDIUM",
+        "faultType": "Shading",
+        "description": "Partial shading detected from nearby obstruction"
+      }
+    },
+    {
+      "name": "LOW Dirty Panel",
+      "description": "Low severity - should NOT trigger ticket",
+      "payload": {
+        "panelId": "PNL-D0401",
+        "severity": "LOW",
+        "faultType": "Dirty Panel",
+        "description": "Minor dust - cleaning recommended at next maintenance"
+      },
+      "expectedBehavior": "skipped"
+    },
+    {
+      "name": "CRITICAL Cracked Panel",
+      "description": "Critical cracked panel damage",
+      "payload": {
+        "panelId": "PNL-E0503",
+        "severity": "CRITICAL",
+        "faultType": "Cracked",
+        "description": "Major crack detected across panel surface - immediate replacement needed"
+      }
+    },
+    {
+      "name": "HIGH Inverter Fault",
+      "description": "High severity inverter issue",
+      "payload": {
+        "panelId": "PNL-F0601",
+        "severity": "HIGH",
+        "faultType": "Inverter Fault",
+        "description": "Inverter showing error code E-402 - output reduced by 60%"
+      }
+    },
+    {
+      "name": "MEDIUM Connector Issue",
+      "description": "Medium severity connector problem",
+      "payload": {
+        "panelId": "PNL-G0708",
+        "severity": "MEDIUM",
+        "faultType": "Connector Issue",
+        "description": "Loose connector detected - causing intermittent power drops"
+      }
+    },
+    {
+      "name": "HIGH Arc Fault",
+      "description": "High severity arc fault - fire risk",
+      "payload": {
+        "panelId": "PNL-H0802",
+        "severity": "HIGH",
+        "faultType": "Arc Fault",
+        "description": "Arc fault detected - potential fire hazard - disconnect recommended"
+      }
+    },
+    {
+      "name": "MEDIUM Degradation",
+      "description": "Medium panel degradation",
+      "payload": {
+        "panelId": "PNL-I0905",
+        "severity": "MEDIUM",
+        "faultType": "Degradation",
+        "description": "Panel degradation detected - output 20% below expected"
+      }
+    },
+    {
+      "name": "HIGH Wiring Fault",
+      "description": "High severity wiring issue",
+      "payload": {
+        "panelId": "PNL-J1001",
+        "severity": "HIGH",
+        "faultType": "Wiring Fault",
+        "description": "Wiring insulation damage detected - safety hazard"
+      }
+    }
+  ],
+  "curlCommands": [
+    {
+      "name": "Test CRITICAL fault",
+      "command": "curl -X POST \"https://your-n8n-instance.webhook.com/solar-fault-alert\" -H \"Content-Type: application/json\" -d '{\"panelId\":\"PNL-A0101\",\"severity\":\"CRITICAL\",\"faultType\":\"Hotspot\",\"description\":\"Thermal hotspot detected - temperature above 85°C\"}'"
+    },
+    {
+      "name": "Test HIGH fault",
+      "command": "curl -X POST \"https://your-n8n-instance.webhook.com/solar-fault-alert\" -H \"Content-Type: application/json\" -d '{\"panelId\":\"PNL-B0205\",\"severity\":\"HIGH\",\"faultType\":\"Dirty Panel\",\"description\":\"Significant dust accumulation detected\"}'"
+    },
+    {
+      "name": "Test MEDIUM fault",
+      "command": "curl -X POST \"https://your-n8n-instance.webhook.com/solar-fault-alert\" -H \"Content-Type: application/json\" -d '{\"panelId\":\"PNL-C0312\",\"severity\":\"MEDIUM\",\"faultType\":\"Shading\",\"description\":\"Partial shading detected\"}'"
+    },
+    {
+      "name": "Test LOW fault (should be skipped)",
+      "command": "curl -X POST \"https://your-n8n-instance.webhook.com/solar-fault-alert\" -H \"Content-Type: application/json\" -d '{\"panelId\":\"PNL-D0401\",\"severity\":\"LOW\",\"faultType\":\"Dirty Panel\",\"description\":\"Minor dust detected\"}'"
+    }
+  ],
+  "pythonExamples": [
+    {
+      "name": "Send critical alert",
+      "code": "sender.send_fault_alert(\n    panel_id='PNL-A0101',\n    severity='CRITICAL',\n    fault_type='Hotspot',\n    description='Thermal hotspot detected - temperature above 85°C'\n)"
+    },
+    {
+      "name": "Send high alert with additional data",
+      "code": "sender.send_fault_alert(\n    panel_id='PNL-B0205',\n    severity='HIGH',\n    fault_type='Dirty Panel',\n    description='Significant dust accumulation detected',\n    additional_data={'efficiency_drop': 15, 'cleaning_required': True}\n)"
+    },
+    {
+      "name": "Batch send",
+      "code": "sender.send_batch_alerts([\n    {'panel_id': 'PNL-A0101', 'severity': 'HIGH', 'fault_type': 'Hotspot', 'description': 'Hotspot detected'},\n    {'panel_id': 'PNL-B0205', 'severity': 'MEDIUM', 'fault_type': 'Dirty Panel', 'description': 'Dust detected'}\n])"
+    }
+  ],
+  "nodeExamples": [
+    {
+      "name": "Send critical alert",
+      "code": "await sender.sendFaultAlert({\n  panelId: 'PNL-A0101',\n  severity: Severity.CRITICAL,\n  faultType: FaultType.HOTSPOT,\n  description: 'Thermal hotspot detected - temperature above 85°C'\n});"
+    },
+    {
+      "name": "Batch send",
+      "code": "await sender.sendBatchAlerts([\n  { panelId: 'PNL-A0101', severity: Severity.HIGH, faultType: FaultType.HOTSPOT, description: 'Hotspot detected' },\n  { panelId: 'PNL-B0205', severity: Severity.MEDIUM, faultType: FaultType.DIRTY_PANEL, description: 'Dust detected' }\n]);"
+    }
+  ]
+}
+

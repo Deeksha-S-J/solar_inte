@@ -4,8 +4,9 @@ import prisma from '../db.js';
 const router = Router();
 const DEVICE_ONLINE_THRESHOLD_MS = 30 * 1000;
 const WEATHER_WRITE_INTERVAL_MS = 30 * 1000;
-const MIN_HEALTHY_PANEL_VOLTAGE = Number(process.env.MIN_HEALTHY_PANEL_VOLTAGE || 6);
-const MIN_WARNING_PANEL_VOLTAGE = Number(process.env.MIN_WARNING_PANEL_VOLTAGE || 4.5);
+const MIN_HEALTHY_PANEL_VOLTAGE = Number(process.env.MIN_HEALTHY_PANEL_VOLTAGE || 15);
+const MIN_WARNING_PANEL_VOLTAGE = Number(process.env.MIN_WARNING_PANEL_VOLTAGE || 10);
+const MIN_FAULT_PANEL_VOLTAGE = Number(process.env.MIN_FAULT_PANEL_VOLTAGE || 10);
 const ALERT_STATUS_TRANSITIONS = new Set(['warning', 'fault']);
 
 // Each ESP32 controls a series string of panels.

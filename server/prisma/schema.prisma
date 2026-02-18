@@ -59,6 +59,7 @@ model Technician {
   resolvedTickets Int       @default(0)
   avgResolutionTime Float   @default(0)
   notes           TicketNote[]
+  assignedTickets Ticket[]  @relation("TicketAssignee")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
@@ -99,6 +100,8 @@ model Ticket {
   resolvedAt        DateTime?
   description       String
   faultType         String
+  zone              String?      // Zone name (e.g., "A", "B") - for row-based alerts
+  row               Int?         // Row number - for row-based alerts
   droneImageUrl     String?
   thermalImageUrl   String?
   aiAnalysis        String?
@@ -106,17 +109,38 @@ model Ticket {
   resolutionNotes   String?
   resolutionCause   String?
   resolutionImageUrl String?
+  assignedTechnician   Technician? @relation("TicketAssignee", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  assignedTechnicianId String?
   notes             TicketNote[]
 
   @@index([status])
   @@index([priority])
+  @@index([assignedTechnicianId])
+}
+
+model AutomationEvent {
+  id            String   @id @default(cuid())
+  eventType     String
+  stage         String
+  incidentId    String
+  panelId       String?
+  scanId        String?
+  faultId       String?
+  ticketId      String?
+  technicianId  String?
+  payload       Json?
+  createdAt     DateTime @default(now())
+
+  @@index([incidentId])
+  @@index([stage])
+  @@index([createdAt])
 }
 
 model TicketNote {
   id          String     @id @default(cuid())
   ticket      Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   ticketId    String
-  author      Technician @relation(fields: [authorId], references: [id])
+  author      Technician @relation(fields: [authorId], references: [id], onDelete: Cascade)
   authorId    String
   content     String
   createdAt   DateTime   @default(now())
@@ -254,3 +278,26 @@ model PanelDetection {
   @@index([status])
 }
 
+// =====================================================
+// ALERTS MODEL
+// =====================================================
+
+model Alert {
+  id          String   @id @default(cuid())
+  alertId     String?  @unique // ALERT ID-AK-001 format
+  zone        String   // Zone name (e.g., "A", "B")
+  row         Int      // Row number
+  status      String   // "warning" or "fault"
+  message     String?  // Optional message
+  dismissed   Boolean  @default(false)
+  scanId      String?  // Link to the scan that triggered this alert
+  ticketId    String?  // Link to the ticket created for this alert
+  createdAt   DateTime @default(now())
+  dismissedAt DateTime?
+
+  @@unique([zone, row, status, dismissed])
+  @@index([dismissed])
+  @@index([createdAt])
+  @@index([scanId])
+  @@index([ticketId])
+}

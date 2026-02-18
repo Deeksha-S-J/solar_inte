@@ -14,10 +14,6 @@ export function MainLayout({ children }: MainLayoutProps) {
           <div className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <SidebarTrigger className="-ml-2" />
             <div className="flex-1" />
-            <div className="flex items-center gap-2">
-              <div className="flex h-2 w-2 animate-pulse rounded-full bg-success" />
-              <span className="text-sm text-muted-foreground">System Online</span>
-            </div>
           </div>
           <div className="p-6">
             {children}

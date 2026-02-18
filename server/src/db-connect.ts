@@ -1,8 +1,14 @@
+import 'dotenv/config';
 import pg from 'pg';
 const { Client } = pg;
 
-// Connection string from the user
-const connectionString = 'postgresql://neondb_owner:npg_jle5YZdO0ICf@ep-wispy-dust-a1fdj9wj-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+// Get connection string from environment variable
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('❌ DATABASE_URL environment variable is not set!');
+  process.exit(1);
+}
 
 async function connectToDatabase() {
   const client = new Client({

@@ -15,7 +15,23 @@ import Settings from "./pages/Settings";
 import Scans from "./pages/Scans";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// Configure React Query with caching to reduce unnecessary refetches
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Data is considered fresh for 30 seconds - reduces API calls
+      staleTime: 30 * 1000,
+      // Keep unused data in cache for 5 minutes
+      gcTime: 5 * 60 * 1000,
+      // Don't refetch on window focus for critical data
+      refetchOnWindowFocus: false,
+      // Retry failed requests once
+      retry: 1,
+      // Don't show error toast immediately
+      throwOnError: false,
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

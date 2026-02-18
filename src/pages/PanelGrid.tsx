@@ -57,6 +57,20 @@ const statusColors: Record<string, string> = {
   offline: 'bg-muted-foreground',
 };
 
+// Voltage-based status colors for rows (based on ESP32 readings)
+const getVoltageStatusColor = (voltage: number): string => {
+  if (voltage < 10) return 'bg-destructive';   // Fault - red
+  if (voltage >= 11 && voltage <= 15) return 'bg-warning';  // Warning - orange
+  return 'bg-success';                        // Healthy - green
+};
+
+// Get row status based on voltage
+const getVoltageStatus = (voltage: number): 'healthy' | 'warning' | 'fault' | 'offline' => {
+  if (voltage < 10) return 'fault';
+  if (voltage >= 11 && voltage <= 15) return 'warning';
+  return 'healthy';
+};
+
 const statusBadgeColors: Record<string, string> = {
   healthy: 'bg-success/10 text-success border-success/30',
   warning: 'bg-warning/10 text-warning border-warning/30',
@@ -74,8 +88,9 @@ export default function PanelGrid() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const previousAlertStatusesRef = useRef<Record<string, 'warning' | 'fault'>>({});
+  const [alertsInitialized, setAlertsInitialized] = useState(false);
   const hasInitializedAlertsRef = useRef(false);
+  const alertedRowsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let isMounted = true;
@@ -116,31 +131,91 @@ export default function PanelGrid() {
     };
   }, []);
 
+  // Fetch existing alerts on initialization to prevent duplicate alerts
   useEffect(() => {
-    const nextAlertStatuses: Record<string, 'warning' | 'fault'> = {};
-
-    for (const panel of panels) {
-      if (panel.status !== 'warning' && panel.status !== 'fault') continue;
-
-      nextAlertStatuses[panel.id] = panel.status;
-      const previousStatus = previousAlertStatusesRef.current[panel.id];
-      const shouldNotify =
-        hasInitializedAlertsRef.current && (!previousStatus || previousStatus !== panel.status);
-
-      if (shouldNotify) {
-        toast({
-          title: panel.status === 'fault' ? 'Fault Alert Triggered' : 'Warning Alert Triggered',
-          description: `${panel.panelId} is now ${panel.status}.`,
-          variant: panel.status === 'fault' ? 'destructive' : 'default',
-        });
+    async function fetchExistingAlerts() {
+      try {
+        const response = await fetch('/api/alerts');
+        if (response.ok) {
+          const alerts = await response.json();
+          // Populate alertedRowsRef with rows that already have alerts
+          alerts.forEach((alert: any) => {
+            const rowKey = `${alert.zone}-${alert.row}`;
+            alertedRowsRef.current.add(rowKey);
+          });
+          console.log('Loaded existing alerts:', alerts.length);
+          setAlertsInitialized(true);
+        }
+      } catch (err) {
+        console.error('Failed to fetch existing alerts:', err);
+        setAlertsInitialized(true); // Continue anyway
       }
     }
 
-    previousAlertStatusesRef.current = nextAlertStatuses;
-    if (!hasInitializedAlertsRef.current) {
+    fetchExistingAlerts();
+  }, []);
+
+  useEffect(() => {
+    // Only trigger alerts after initial load and after alerts are initialized from DB
+    if (!hasInitializedAlertsRef.current || !alertsInitialized) {
       hasInitializedAlertsRef.current = true;
+      // Initialize alerted rows based on current panel statuses
+      panels.forEach((panel) => {
+        if (panel.status === 'warning' || panel.status === 'fault') {
+          const rowKey = `${panel.zone?.name}-${panel.row}`;
+          alertedRowsRef.current.add(rowKey);
+        }
+      });
+      return;
     }
-  }, [panels, toast]);
+
+    // Group panels by row and check for status changes
+    const rowMap = new Map<string, { zone: string; row: number; status: string; avgVoltage: number }>();
+    
+    for (const panel of panels) {
+      const rowKey = `${panel.zone?.name}-${panel.row}`;
+      if (panel.status === 'warning' || panel.status === 'fault') {
+        if (!rowMap.has(rowKey)) {
+          rowMap.set(rowKey, { 
+            zone: panel.zone?.name || 'unknown', 
+            row: panel.row, 
+            status: panel.status,
+            avgVoltage: (panel.sensorVoltage || 0) as number
+          });
+        }
+      }
+    }
+
+// Check each row for new alerts (that haven't been alerted yet)
+    rowMap.forEach((rowData, rowKey) => {
+      if (!alertedRowsRef.current.has(rowKey)) {
+        // New alert for this row - create alert in DB
+        alertedRowsRef.current.add(rowKey);
+
+        // Create alert in database (only for warning and fault statuses)
+        if (rowData.status === 'warning' || rowData.status === 'fault') {
+          fetch('/api/alerts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              zone: rowData.zone,
+              row: rowData.row,
+              status: rowData.status,
+              message: `Row ${rowData.row} in Zone ${rowData.zone} is showing ${rowData.status} status (voltage: ${rowData.avgVoltage.toFixed(2)}V)`
+            })
+          }).catch(err => console.error('Failed to create alert:', err));
+        }
+      }
+    });
+
+    // Clear alerted rows that are now healthy
+    const currentRowKeys = new Set(rowMap.keys());
+    alertedRowsRef.current.forEach((alertedRow) => {
+      if (!currentRowKeys.has(alertedRow)) {
+        alertedRowsRef.current.delete(alertedRow);
+      }
+    });
+  }, [panels, toast, alertsInitialized]);
 
   // Get unique zones
   const zones = [...new Set(panels.map(p => p.zone?.name).filter(Boolean))].sort() as string[];
@@ -170,21 +245,29 @@ export default function PanelGrid() {
     return Object.entries(groupedByRow).map(([rowStr, rowPanels]) => {
       const row = Number(rowStr);
       const sortedPanels = [...rowPanels].sort((a, b) => a.column - b.column);
-      const status: RowGroupData['status'] =
-        sortedPanels.every((panel) => panel.status === 'offline')
-          ? 'offline'
-          : sortedPanels.some((panel) => panel.status === 'fault')
-          ? 'fault'
-          : sortedPanels.some((panel) => panel.status === 'warning')
-          ? 'warning'
-          : 'healthy';
+      
+      // Determine status based on ESP32 voltage reading
+      const devicePanel = sortedPanels.find((panel) => panel.sensorDeviceId);
+      const voltageV = (devicePanel?.sensorVoltage || 0) as number;
+      
+      // Voltage-based status: <10V = fault (red), 11-15V = warning (orange), >15V = healthy (green)
+      let status: RowGroupData['status'];
+      if (voltageV < 10) {
+        status = 'fault';
+      } else if (voltageV >= 11 && voltageV <= 15) {
+        status = 'warning';
+      } else {
+        status = 'healthy';
+      }
+      
+      // Override with offline if all panels are offline
+      const allOffline = sortedPanels.every((panel) => panel.status === 'offline');
+      if (allOffline) status = 'offline';
 
       const totalOutputW = sortedPanels.reduce((sum, panel) => sum + (panel.currentOutput || 0), 0);
       const totalMaxOutputW = sortedPanels.reduce((sum, panel) => sum + (panel.maxOutput || 0), 0);
       const efficiency = totalMaxOutputW > 0 ? (totalOutputW / totalMaxOutputW) * 100 : 0;
-      const devicePanel = sortedPanels.find((panel) => panel.sensorDeviceId);
       const currentA = ((devicePanel?.sensorCurrentMa || 0) as number) / 1000;
-      const voltageV = (devicePanel?.sensorVoltage || 0) as number;
       const powerW = ((devicePanel?.sensorPowerMw || 0) as number) / 1000;
 
       return {
@@ -386,12 +469,22 @@ export default function PanelGrid() {
 
             {/* Legend */}
             <div className="flex flex-wrap items-center gap-4">
-              {Object.entries(statusColors).map(([status, color]) => (
-                <div key={status} className="flex items-center gap-2">
-                  <div className={cn('h-4 w-4 rounded-sm', color)} />
-                  <span className="text-sm capitalize">{status}</span>
-                </div>
-              ))}
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-sm bg-destructive" />
+<span className="text-sm">Fault - Low Voltage</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-sm bg-warning" />
+                <span className="text-sm">Warning (11-15V)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-sm bg-success" />
+<span className="text-sm">Healthy - Normal Voltage</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-4 w-4 rounded-sm bg-muted-foreground" />
+                <span className="text-sm">Offline</span>
+              </div>
             </div>
           </TabsContent>
 

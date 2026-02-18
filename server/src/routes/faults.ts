@@ -45,9 +45,16 @@ router.post('/panel-status-alert', async (req: Request, res: Response) => {
     const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
     // Prevent duplicate alerts for unchanged status within a short window.
+    // Check at ROW level - one alert per row
+    const panelsInRow = await prisma.solarPanel.findMany({
+      where: { row: panel.row },
+      select: { id: true },
+    });
+    const panelIdsInRow = panelsInRow.map(p => p.id);
+
     const recentExisting = await prisma.faultDetection.findFirst({
       where: {
-        panelId: panel.id,
+        panelId: { in: panelIdsInRow },
         faultType: metadata.faultType,
         detectedAt: { gte: tenMinutesAgo },
       },
