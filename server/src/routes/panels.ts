@@ -568,7 +568,12 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
       const shouldWriteWeather =
         !latestWeather ||
         now.getTime() - new Date(latestWeather.recordedAt).getTime() >= WEATHER_WRITE_INTERVAL_MS;
-      if (shouldWriteWeather) {
+      const hasValidWeatherValues =
+        Number.isFinite(temperatureValue) &&
+        Number.isFinite(humidityValue) &&
+        temperatureValue > 0 &&
+        humidityValue > 0;
+      if (shouldWriteWeather && hasValidWeatherValues) {
         const roundedTemperature = Math.round(temperatureValue * 100) / 100;
         weatherData = await prisma.weatherData.create({
           data: {

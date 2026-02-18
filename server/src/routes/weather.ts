@@ -201,6 +201,10 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 router.get('/current', async (_req: Request, res: Response) => {
   try {
     const latestSensorWeather = await prisma.weatherData.findFirst({
+      where: {
+        temperature: { gt: 0 },
+        humidity: { gt: 0 },
+      },
       orderBy: { recordedAt: 'desc' },
     });
 
