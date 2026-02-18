@@ -22,14 +22,8 @@ const statusBadgeStyles = {
 };
 
 export function AlertCard({ alert, onDismiss }: AlertCardProps) {
-  // Get alertId from the alert (handle both old and new format)
-  // Strip "ALERT ID-" or "ALERT ID-AK-" prefix and convert to ALT-XXX format
-  let displayAlertId = alert.alertId || alert.id.slice(0, 8);
-  if (displayAlertId.startsWith('ALERT ID-AK-')) {
-    displayAlertId = 'ALT-' + displayAlertId.replace('ALERT ID-AK-', '');
-  } else if (displayAlertId.startsWith('ALERT ID-')) {
-    displayAlertId = 'ALT-' + displayAlertId.replace('ALERT ID-', '');
-  }
+  // Display the alert ID directly - already in ALT-XXX format
+  const displayAlertId = alert.alertId || alert.id.slice(0, 8);
   
   return (
     <Card className={cn('overflow-hidden border-2', statusStyles[alert.status])}>
