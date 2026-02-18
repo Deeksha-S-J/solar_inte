@@ -22,27 +22,45 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const toDate = (timestamp: Date | string) => (timestamp instanceof Date ? timestamp : new Date(timestamp));
 
+  const sampleSeries = <T,>(items: T[], maxPoints: number) => {
+    if (items.length <= maxPoints) return items;
+    const step = Math.ceil(items.length / maxPoints);
+    return items.filter((_, i) => i % step === 0);
+  };
+
   const getData = () => {
+    const toPoints = (items: { timestamp: Date | string; value: number }[]) =>
+      [...items]
+        .map((d) => ({ date: toDate(d.timestamp), value: d.value }))
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+
     switch (period) {
-      case 'daily':
-        return daily.map(d => ({
-          time: format(toDate(d.timestamp), 'HH:mm'),
+      case 'daily': {
+        const pts = sampleSeries(toPoints(daily), 16);
+        return pts.map((d) => ({
+          time: format(d.date, 'HH:mm'),
           value: d.value,
         }));
-      case 'weekly':
-        return weekly.filter((_, i) => i % 4 === 0).map(d => ({
-          time: format(toDate(d.timestamp), 'EEE HH:mm'),
+      }
+      case 'weekly': {
+        const pts = sampleSeries(toPoints(weekly), 10);
+        return pts.map((d) => ({
+          time: format(d.date, 'EEE'),
           value: d.value,
         }));
-      case 'monthly':
-        return monthly.map(d => ({
-          time: format(toDate(d.timestamp), 'MMM dd'),
+      }
+      case 'monthly': {
+        const pts = sampleSeries(toPoints(monthly), 8);
+        return pts.map((d) => ({
+          time: format(d.date, 'MMM d'),
           value: d.value,
         }));
+      }
     }
   };
 
   const data = getData();
+  const xTickAngle = 0;
 
   return (
     <Card>
@@ -57,27 +75,33 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
         </Tabs>
       </CardHeader>
       <CardContent>
-        <div className="h-[300px] w-full">
+        <div className="h-[340px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <AreaChart data={data} margin={{ top: 12, right: 14, left: 0, bottom: 28 }}>
               <defs>
                 <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.26} />
                   <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <CartesianGrid strokeDasharray="4 4" vertical={false} className="stroke-muted/50" />
               <XAxis
                 dataKey="time"
                 tick={{ fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
+                angle={xTickAngle}
+                textAnchor="middle"
+                height={28}
+                interval={0}
+                minTickGap={0}
                 className="text-muted-foreground"
               />
               <YAxis
                 tick={{ fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
+                width={44}
                 tickFormatter={(value) => `${value}`}
                 className="text-muted-foreground"
               />
@@ -95,8 +119,9 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
                 type="monotone"
                 dataKey="value"
                 stroke="hsl(var(--primary))"
-                strokeWidth={2}
+                strokeWidth={3}
                 fill="url(#powerGradient)"
+                activeDot={{ r: 4 }}
                 animationDuration={1000}
               />
             </AreaChart>

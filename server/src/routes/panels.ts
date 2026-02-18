@@ -6,6 +6,7 @@ const DEVICE_ONLINE_THRESHOLD_MS = 30 * 1000;
 const WEATHER_WRITE_INTERVAL_MS = 30 * 1000;
 const MIN_HEALTHY_PANEL_VOLTAGE = Number(process.env.MIN_HEALTHY_PANEL_VOLTAGE || 6);
 const MIN_WARNING_PANEL_VOLTAGE = Number(process.env.MIN_WARNING_PANEL_VOLTAGE || 4.5);
+const ALERT_STATUS_TRANSITIONS = new Set(['warning', 'fault']);
 
 // Each ESP32 controls a series string of panels.
 const deviceToPanelMap: Record<string, string[]> = {
@@ -36,6 +37,54 @@ function parseNumber(value: unknown): number {
 function getDeviceOnline(lastSeenAt: Date | null | undefined, nowMs: number): boolean {
   if (!lastSeenAt) return false;
   return nowMs - new Date(lastSeenAt).getTime() <= DEVICE_ONLINE_THRESHOLD_MS;
+}
+
+function deriveFaultMetadata(
+  status: string,
+  voltagePerPanel: number,
+  powerPerPanelW: number,
+): { severity: string; faultType: string; analysis: string; action: string } {
+  if (status === 'fault') {
+    if (voltagePerPanel < MIN_WARNING_PANEL_VOLTAGE) {
+      return {
+        severity: 'critical',
+        faultType: 'critical_low_voltage',
+        analysis: `Panel voltage (${voltagePerPanel.toFixed(2)}V) is below fault threshold (${MIN_WARNING_PANEL_VOLTAGE.toFixed(2)}V).`,
+        action: 'Inspect panel wiring and inverter path immediately.',
+      };
+    }
+
+    return {
+      severity: 'high',
+      faultType: 'no_power_output',
+      analysis: 'Panel has no measurable power output while device is online.',
+      action: 'Inspect panel for hardware failure, shading, or disconnect.',
+    };
+  }
+
+  if (powerPerPanelW <= 0) {
+    return {
+      severity: 'medium',
+      faultType: 'low_power_output',
+      analysis: 'Panel output is below expected level for current operating conditions.',
+      action: 'Schedule preventive inspection and clean panel surface if needed.',
+    };
+  }
+
+  return {
+    severity: 'low',
+    faultType: 'low_voltage_warning',
+    analysis: `Panel voltage (${voltagePerPanel.toFixed(2)}V) is below healthy threshold (${MIN_HEALTHY_PANEL_VOLTAGE.toFixed(2)}V).`,
+    action: 'Monitor panel performance and inspect connectors during maintenance window.',
+  };
+}
+
+function deriveAggregateStatus(statuses: string[]): 'healthy' | 'warning' | 'fault' | 'offline' {
+  if (statuses.length === 0) return 'offline';
+  if (statuses.every((status) => status === 'offline')) return 'offline';
+  if (statuses.some((status) => status === 'fault')) return 'fault';
+  if (statuses.some((status) => status === 'warning')) return 'warning';
+  return 'healthy';
 }
 
 async function withDeviceSensorData<T extends { panelId: string }>(panels: T[]) {
@@ -485,6 +534,7 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
 
     const panels = await prisma.solarPanel.findMany({
       where: { panelId: { in: panelIds } },
+      include: { zone: true },
     });
 
     if (panels.length === 0) {
@@ -574,6 +624,7 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
     const powerPerPanelMw = power / panelCount;
     const powerPerPanelW = powerPerPanelMw / 1000;
 
+    const previousRowStatus = deriveAggregateStatus(panels.map((panel) => panel.status));
     const updatedPanels = [];
     for (const panel of panels) {
       const efficiency = panel.maxOutput > 0 ? (powerPerPanelW / panel.maxOutput) * 100 : 0;
@@ -599,6 +650,37 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
         currentOutput: updatedPanel.currentOutput,
         efficiency: updatedPanel.efficiency,
         status: updatedPanel.status,
+      });
+    }
+
+    const nextRowStatus = deriveAggregateStatus(updatedPanels.map((panel) => panel.status));
+    const shouldCreateRowAlert =
+      ALERT_STATUS_TRANSITIONS.has(nextRowStatus) && previousRowStatus !== nextRowStatus;
+
+    if (shouldCreateRowAlert) {
+      const rowAnchorPanel = [...panels].sort((a, b) => a.column - b.column)[0];
+      const { severity, analysis, action } = deriveFaultMetadata(
+        nextRowStatus,
+        voltagePerPanel,
+        powerPerPanelW,
+      );
+      const zoneName = rowAnchorPanel?.zone?.name || 'unknown';
+      const rowNumber = rowAnchorPanel?.row ?? 0;
+
+      await prisma.faultDetection.create({
+        data: {
+          panelId: rowAnchorPanel.id,
+          detectedAt: now,
+          severity,
+          faultType: `row_${nextRowStatus}`,
+          droneImageUrl: null,
+          thermalImageUrl: null,
+          aiConfidence: 100,
+          aiAnalysis: `Zone ${zoneName} Row ${rowNumber}: ${analysis}`,
+          recommendedAction: action,
+          locationX: rowAnchorPanel.column * 10,
+          locationY: rowAnchorPanel.row * 10,
+        },
       });
     }
 

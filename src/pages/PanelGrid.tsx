@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils';
 import { Search, Download, ZoomIn, ZoomOut, Grid3X3, List, GitBranch } from 'lucide-react';
 import { format } from 'date-fns';
+import { useToast } from '@/hooks/use-toast';
 
 // Types matching API response
 interface PanelData {
@@ -64,6 +65,7 @@ const statusBadgeColors: Record<string, string> = {
 };
 
 export default function PanelGrid() {
+  const { toast } = useToast();
   const [panels, setPanels] = useState<PanelData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedZone, setSelectedZone] = useState<string>('all');
@@ -72,6 +74,8 @@ export default function PanelGrid() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const previousAlertStatusesRef = useRef<Record<string, 'warning' | 'fault'>>({});
+  const hasInitializedAlertsRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -111,6 +115,32 @@ export default function PanelGrid() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    const nextAlertStatuses: Record<string, 'warning' | 'fault'> = {};
+
+    for (const panel of panels) {
+      if (panel.status !== 'warning' && panel.status !== 'fault') continue;
+
+      nextAlertStatuses[panel.id] = panel.status;
+      const previousStatus = previousAlertStatusesRef.current[panel.id];
+      const shouldNotify =
+        hasInitializedAlertsRef.current && (!previousStatus || previousStatus !== panel.status);
+
+      if (shouldNotify) {
+        toast({
+          title: panel.status === 'fault' ? 'Fault Alert Triggered' : 'Warning Alert Triggered',
+          description: `${panel.panelId} is now ${panel.status}.`,
+          variant: panel.status === 'fault' ? 'destructive' : 'default',
+        });
+      }
+    }
+
+    previousAlertStatusesRef.current = nextAlertStatuses;
+    if (!hasInitializedAlertsRef.current) {
+      hasInitializedAlertsRef.current = true;
+    }
+  }, [panels, toast]);
 
   // Get unique zones
   const zones = [...new Set(panels.map(p => p.zone?.name).filter(Boolean))].sort() as string[];
@@ -322,24 +352,24 @@ export default function PanelGrid() {
                   {Object.entries(visibleRowsByZone)
                     .sort(([zoneA], [zoneB]) => zoneA.localeCompare(zoneB))
                     .map(([zone, zoneRows]) => (
-                      <div key={zone} className="w-[190px] rounded-md border bg-muted/15 p-1.5">
-                        <h3 className="mb-1 text-xs font-semibold">Zone {zone}</h3>
-                        <div className="space-y-0.5">
+                      <div key={zone} className="w-[260px] rounded-md border bg-muted/15 p-2.5">
+                        <h3 className="mb-2 text-sm font-semibold">Zone {zone}</h3>
+                        <div className="space-y-1.5">
                           {zoneRows.map((rowGroup) => (
-                            <div key={rowGroup.key} className="flex items-center gap-1">
-                              <span className="w-10 text-[10px] font-semibold text-muted-foreground">Row {rowGroup.row}</span>
+                            <div key={rowGroup.key} className="flex items-center gap-2">
+                              <span className="w-12 text-xs font-semibold text-muted-foreground">Row {rowGroup.row}</span>
                               <button
                                 onClick={() => setSelectedRowKey(rowGroup.key)}
                                 className={cn(
-                                  'h-[28px] w-[86px] rounded-[3px] border px-0 transition-colors',
+                                  'h-[36px] w-[116px] rounded-[4px] border px-0 transition-colors',
                                   selectedRowKey === rowGroup.key ? 'border-primary bg-primary/5' : 'bg-background',
                                 )}
                               >
-                                <div className="flex items-center gap-px">
+                                <div className="flex items-center gap-0.5">
                                   {rowGroup.panels.map((panel) => (
                                     <div
                                       key={panel.id}
-                                      className={cn('h-[28px] w-[28px] rounded-[2px]', statusColors[panel.status] || 'bg-gray-400')}
+                                      className={cn('h-[36px] w-[36px] rounded-[3px]', statusColors[panel.status] || 'bg-gray-400')}
                                       title={`${panel.panelId} - ${panel.status}`}
                                     />
                                   ))}

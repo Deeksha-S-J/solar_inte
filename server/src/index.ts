@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import prisma from './db.js';
 import path from 'path';
 import fs from 'fs';
+import { createClient } from '@supabase/supabase-js';
 
 // Routes
 import panelsRouter from './routes/panels.js';
@@ -30,6 +31,15 @@ const io = new Server(httpServer, {
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_PI_RESULTS = 50;
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'solar-images';
+const USE_SUPABASE_STORAGE = process.env.USE_SUPABASE_STORAGE !== 'false';
+
+const supabase =
+  USE_SUPABASE_STORAGE && SUPABASE_URL && SUPABASE_ANON_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
 // Directory to save received images from Pi
 const PI_SAVE_DIR = path.join(process.cwd(), 'received_from_pi');
@@ -67,6 +77,10 @@ type PiAnalysisResultInput = {
     summary?: string;
     root_cause?: string;
     impact_assessment?: string;
+    source?: string;
+    baseline_aware?: boolean;
+    deviation_from_baseline?: string;
+    genai_insights?: string;
   };
   rgb_stats?: {
     total?: number;
@@ -76,12 +90,24 @@ type PiAnalysisResultInput = {
   frame_b64?: string;
   thermal_b64?: string;
   thermal?: {
+    fault?: string;
     min_temp?: number;
     max_temp?: number;
     mean_temp?: number;
     delta?: number;
     risk_score?: number;
     severity?: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW';
+    baseline_delta?: number | null;
+  };
+  thermal_stats?: {
+    fault?: string;
+    min_temp?: number;
+    max_temp?: number;
+    mean_temp?: number;
+    delta?: number;
+    risk_score?: number;
+    severity?: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW';
+    baseline_delta?: number | null;
   };
   panel_crops?: PiPanelCropInput[];
   device_id?: string;
@@ -101,6 +127,10 @@ type PiResultForClients = {
     summary: string;
     root_cause: string;
     impact_assessment: string;
+    source?: string;
+    baseline_aware?: boolean;
+    deviation_from_baseline?: string;
+    genai_insights?: string;
   };
   rgb_stats: {
     total: number;
@@ -110,12 +140,24 @@ type PiResultForClients = {
   main_image_web: string | null;
   thermal_image_web: string | null;
   thermal: {
+    fault: string | null;
     min_temp: number | null;
     max_temp: number | null;
     mean_temp: number | null;
     delta: number | null;
     risk_score: number | null;
     severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | null;
+    baseline_delta: number | null;
+  };
+  thermal_stats: {
+    fault: string | null;
+    min_temp: number | null;
+    max_temp: number | null;
+    mean_temp: number | null;
+    delta: number | null;
+    risk_score: number | null;
+    severity: 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' | null;
+    baseline_delta: number | null;
   };
   panel_crops: Array<{
     panel_number: string;
@@ -139,6 +181,37 @@ const decodeBase64Image = (rawData: string) => {
   const parts = rawData.split(',');
   const base64Data = parts.length > 1 ? parts[1] : parts[0];
   return Buffer.from(base64Data, 'base64');
+};
+
+const uploadBase64ToSupabase = async (
+  rawData: string,
+  folder: 'rgb' | 'thermal',
+  fileName: string
+): Promise<string | null> => {
+  if (!supabase) return null;
+
+  try {
+    const buffer = decodeBase64Image(rawData);
+    const objectPath = `${folder}/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from(SUPABASE_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: 'image/jpeg',
+        upsert: true,
+      });
+
+    if (error) {
+      console.error(`Supabase upload failed [${objectPath}]:`, error.message);
+      return null;
+    }
+
+    const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath);
+    return data?.publicUrl || null;
+  } catch (error) {
+    console.error('Supabase upload exception:', error);
+    return null;
+  }
 };
 
 const getSeverityFromHealthScore = (healthScore: number): 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' => {
@@ -289,22 +362,30 @@ io.on('connection', (socket) => {
 
       if (data.frame_b64) {
         const captureFileName = `capture_${safeCaptureId}_${timestampSuffix}.jpg`;
-        const captureFilePath = path.join(CAPTURES_DIR, captureFileName);
-        fs.writeFileSync(captureFilePath, decodeBase64Image(data.frame_b64));
-        mainImageWebPath = `/api/pi-images/captures/${captureFileName}`;
+        mainImageWebPath = await uploadBase64ToSupabase(data.frame_b64, 'rgb', captureFileName);
+
+        if (!mainImageWebPath) {
+          const captureFilePath = path.join(CAPTURES_DIR, captureFileName);
+          fs.writeFileSync(captureFilePath, decodeBase64Image(data.frame_b64));
+          mainImageWebPath = `/api/pi-images/captures/${captureFileName}`;
+        }
       }
 
       if (data.thermal_b64) {
         const thermalFileName = `thermal_${safeCaptureId}_${timestampSuffix}.jpg`;
-        const thermalFilePath = path.join(CAPTURES_DIR, thermalFileName);
-        fs.writeFileSync(thermalFilePath, decodeBase64Image(data.thermal_b64));
-        thermalImageWebPath = `/api/pi-images/captures/${thermalFileName}`;
+        thermalImageWebPath = await uploadBase64ToSupabase(data.thermal_b64, 'thermal', thermalFileName);
+
+        if (!thermalImageWebPath) {
+          const thermalFilePath = path.join(CAPTURES_DIR, thermalFileName);
+          fs.writeFileSync(thermalFilePath, decodeBase64Image(data.thermal_b64));
+          thermalImageWebPath = `/api/pi-images/captures/${thermalFileName}`;
+        }
       }
 
       const panelCropsInput = Array.isArray(data.panel_crops) ? data.panel_crops : [];
       const panelCropsForClients: PiResultForClients['panel_crops'] = [];
 
-      panelCropsInput.forEach((crop, index) => {
+      for (const [index, crop] of panelCropsInput.entries()) {
         const panelNumber = crop.panel_number ?? `P${index + 1}`;
         const status = crop.status ?? 'UNKNOWN';
         const hasDust = crop.has_dust ?? status === 'DUSTY';
@@ -312,9 +393,13 @@ io.on('connection', (socket) => {
 
         if (crop.image_b64) {
           const cropFileName = `panel_${sanitizeFilePart(panelNumber)}_cap${safeCaptureId}_${timestampSuffix}.jpg`;
-          const cropFilePath = path.join(PANEL_CROPS_DIR, cropFileName);
-          fs.writeFileSync(cropFilePath, decodeBase64Image(crop.image_b64));
-          webPath = `/api/pi-images/panel_crops/${cropFileName}`;
+          webPath = await uploadBase64ToSupabase(crop.image_b64, 'rgb', cropFileName);
+
+          if (!webPath) {
+            const cropFilePath = path.join(PANEL_CROPS_DIR, cropFileName);
+            fs.writeFileSync(cropFilePath, decodeBase64Image(crop.image_b64));
+            webPath = `/api/pi-images/panel_crops/${cropFileName}`;
+          }
         }
 
         panelCropsForClients.push({
@@ -323,21 +408,23 @@ io.on('connection', (socket) => {
           has_dust: hasDust,
           web_path: webPath,
         });
-      });
+      }
 
       const dustyPanelCount =
         data.rgb_stats?.dusty ?? panelCropsForClients.filter((crop) => crop.status === 'DUSTY').length;
       const cleanPanelCount =
         data.rgb_stats?.clean ?? panelCropsForClients.filter((crop) => crop.status === 'CLEAN').length;
       const totalPanels = data.rgb_stats?.total ?? panelCropsForClients.length;
-      const severity =
-        data.thermal?.severity ?? getSeverityFromHealthScore(healthScore);
+      const thermalData = data.thermal_stats ?? data.thermal;
+      const severity = thermalData?.severity ?? getSeverityFromHealthScore(healthScore);
       const riskScore =
-        data.thermal?.risk_score ?? Math.max(0, Math.min(100, Math.round(100 - healthScore)));
-      const thermalMinTemp = data.thermal?.min_temp ?? null;
-      const thermalMaxTemp = data.thermal?.max_temp ?? null;
-      const thermalMeanTemp = data.thermal?.mean_temp ?? null;
-      const thermalDelta = data.thermal?.delta ?? null;
+        thermalData?.risk_score ?? Math.max(0, Math.min(100, Math.round(100 - healthScore)));
+      const thermalFault = thermalData?.fault ?? null;
+      const thermalMinTemp = thermalData?.min_temp ?? null;
+      const thermalMaxTemp = thermalData?.max_temp ?? null;
+      const thermalMeanTemp = thermalData?.mean_temp ?? null;
+      const thermalDelta = thermalData?.delta ?? null;
+      const thermalBaselineDelta = thermalData?.baseline_delta ?? null;
 
       const savedScan = await prisma.solarScan.create({
         data: {
@@ -387,6 +474,10 @@ io.on('connection', (socket) => {
           summary: data.report.summary ?? '',
           root_cause: data.report.root_cause ?? '',
           impact_assessment: data.report.impact_assessment ?? '',
+          source: data.report.source ?? '',
+          baseline_aware: data.report.baseline_aware ?? false,
+          deviation_from_baseline: data.report.deviation_from_baseline ?? '',
+          genai_insights: data.report.genai_insights ?? '',
         },
         rgb_stats: {
           total: totalPanels,
@@ -396,12 +487,24 @@ io.on('connection', (socket) => {
         main_image_web: mainImageWebPath,
         thermal_image_web: thermalImageWebPath,
         thermal: {
+          fault: thermalFault,
           min_temp: thermalMinTemp,
           max_temp: thermalMaxTemp,
           mean_temp: thermalMeanTemp,
           delta: thermalDelta,
           risk_score: riskScore,
           severity,
+          baseline_delta: thermalBaselineDelta,
+        },
+        thermal_stats: {
+          fault: thermalFault,
+          min_temp: thermalMinTemp,
+          max_temp: thermalMaxTemp,
+          mean_temp: thermalMeanTemp,
+          delta: thermalDelta,
+          risk_score: riskScore,
+          severity,
+          baseline_delta: thermalBaselineDelta,
         },
         panel_crops: panelCropsForClients,
       };

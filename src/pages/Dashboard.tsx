@@ -46,29 +46,6 @@ const defaultWeather: WeatherData = {
   ],
 };
 
-// Helper to create date for today at specific hour
-const createDate = (hour: number) => {
-  const date = new Date();
-  date.setHours(hour, 0, 0, 0);
-  return date;
-};
-
-// Helper to create date for day of week
-const createWeekDate = (dayOffset: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() - date.getDay() + dayOffset);
-  date.setHours(12, 0, 0, 0);
-  return date;
-};
-
-// Helper to create date for month
-const createMonthDate = (month: number) => {
-  const date = new Date();
-  date.setMonth(month, 15);
-  date.setHours(12, 0, 0, 0);
-  return date;
-};
-
 interface PowerPoint {
   timestamp: string | Date;
   value: number;
@@ -82,34 +59,12 @@ interface DashboardAnalytics {
   };
 }
 
-// Default sample analytics when API is unavailable
+// Default analytics (empty until API data loads)
 const defaultAnalytics: DashboardAnalytics = {
   powerGeneration: {
-    daily: [
-      { timestamp: createDate(6), value: 0 },
-      { timestamp: createDate(9), value: 15 },
-      { timestamp: createDate(12), value: 42 },
-      { timestamp: createDate(15), value: 48 },
-      { timestamp: createDate(18), value: 35 },
-      { timestamp: createDate(21), value: 5 },
-    ],
-    weekly: [
-      { timestamp: createWeekDate(1), value: 180 },
-      { timestamp: createWeekDate(2), value: 195 },
-      { timestamp: createWeekDate(3), value: 210 },
-      { timestamp: createWeekDate(4), value: 185 },
-      { timestamp: createWeekDate(5), value: 200 },
-      { timestamp: createWeekDate(6), value: 175 },
-      { timestamp: createWeekDate(7), value: 190 },
-    ],
-    monthly: [
-      { timestamp: createMonthDate(0), value: 5200 },
-      { timestamp: createMonthDate(1), value: 4800 },
-      { timestamp: createMonthDate(2), value: 6100 },
-      { timestamp: createMonthDate(3), value: 5800 },
-      { timestamp: createMonthDate(4), value: 6500 },
-      { timestamp: createMonthDate(5), value: 6200 },
-    ],
+    daily: [],
+    weekly: [],
+    monthly: [],
   },
 };
 
@@ -367,7 +322,6 @@ export default function Dashboard() {
           }
         }
 
-        let powerHistory30s: LivePowerPoint[] = [];
         let liveMetricsPatch: Partial<DashboardMetrics> = {};
         if (liveStatusRes.ok) {
           try {
@@ -392,7 +346,6 @@ export default function Dashboard() {
               devices: Array.isArray(statusData.devices) ? statusData.devices : [],
               powerHistory30s: Array.isArray(statusData.powerHistory30s) ? statusData.powerHistory30s : [],
             };
-            powerHistory30s = parsedLiveStatus.powerHistory30s;
             setLiveStatus(parsedLiveStatus);
             liveMetricsPatch = {
               totalPanels: parsedLiveStatus.totalPanels,
@@ -409,13 +362,6 @@ export default function Dashboard() {
         } else {
           setLiveStatus(defaultLiveStatus);
         }
-        const dailyPowerForChart: PowerPoint[] =
-          powerHistory30s.length > 0
-            ? powerHistory30s.map((point) => ({
-                timestamp: point.timestamp,
-                value: point.totalPowerKw,
-              }))
-            : powerDaily;
         const mergedMetrics: DashboardMetrics = {
           ...metrics,
           ...liveMetricsPatch,
@@ -429,7 +375,7 @@ export default function Dashboard() {
           openMeteoWeather,
           analytics: {
             powerGeneration: {
-              daily: dailyPowerForChart,
+              daily: powerDaily,
               weekly: powerWeekly,
               monthly: powerMonthly,
             },

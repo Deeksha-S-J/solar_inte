@@ -8,7 +8,7 @@
 
 const char* ssid = "TP-Link_83B8";
 const char* password = "15400338";
-const char* serverURL = "http://192.168.0.169:3000/api/panels/sensor-update";
+const char* serverURL = "http://192.168.0.110:3000/api/panels/sensor-update";
 
 Adafruit_INA219 ina219;
 
@@ -93,3 +93,4 @@ void sendToBackend(float voltage, float current, float power) {
 
   http.end();
 }
+

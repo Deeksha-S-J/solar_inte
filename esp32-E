@@ -10,7 +10,7 @@
 const char* ssid = "TP-Link_83B8";
 const char* password = "15400338";
 
-const char* host = "192.168.0.169";
+const char* host = "192.168.0.110";
 const int   port = 3000;
 const char* path = "/api/panels/sensor-update";
 
@@ -144,3 +144,4 @@ void sendToBackend(float voltage, float current, float power) {
 
   Serial.println("Data sent safely");
 }
+

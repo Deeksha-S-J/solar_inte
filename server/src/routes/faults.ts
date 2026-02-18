@@ -3,6 +3,84 @@ import prisma from '../db.js';
 
 const router = Router();
 
+function buildStatusAlertMetadata(status: 'warning' | 'fault') {
+  if (status === 'fault') {
+    return {
+      severity: 'critical',
+      faultType: 'panel_fault',
+      aiAnalysis: 'Panel status changed to fault based on live telemetry.',
+      recommendedAction: 'Dispatch technician for immediate on-site inspection.',
+    };
+  }
+
+  return {
+    severity: 'medium',
+    faultType: 'panel_warning',
+    aiAnalysis: 'Panel status changed to warning based on live telemetry.',
+    recommendedAction: 'Schedule inspection and monitor panel performance closely.',
+  };
+}
+
+// Create fault alert from panel status transition
+router.post('/panel-status-alert', async (req: Request, res: Response) => {
+  try {
+    const panelId = typeof req.body?.panelId === 'string' ? req.body.panelId : '';
+    const status = req.body?.status;
+
+    if (!panelId || (status !== 'warning' && status !== 'fault')) {
+      return res.status(400).json({ error: 'panelId and status (warning|fault) are required' });
+    }
+
+    const panel = await prisma.solarPanel.findUnique({
+      where: { id: panelId },
+      select: { id: true, row: true, column: true },
+    });
+
+    if (!panel) {
+      return res.status(404).json({ error: 'Panel not found' });
+    }
+
+    const metadata = buildStatusAlertMetadata(status);
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+
+    // Prevent duplicate alerts for unchanged status within a short window.
+    const recentExisting = await prisma.faultDetection.findFirst({
+      where: {
+        panelId: panel.id,
+        faultType: metadata.faultType,
+        detectedAt: { gte: tenMinutesAgo },
+      },
+      orderBy: { detectedAt: 'desc' },
+    });
+
+    if (recentExisting) {
+      return res.status(200).json({ created: false, faultDetection: recentExisting });
+    }
+
+    const faultDetection = await prisma.faultDetection.create({
+      data: {
+        panelId: panel.id,
+        detectedAt: now,
+        severity: metadata.severity,
+        faultType: metadata.faultType,
+        droneImageUrl: null,
+        thermalImageUrl: null,
+        aiConfidence: 100,
+        aiAnalysis: metadata.aiAnalysis,
+        recommendedAction: metadata.recommendedAction,
+        locationX: panel.column * 10,
+        locationY: panel.row * 10,
+      },
+    });
+
+    return res.status(201).json({ created: true, faultDetection });
+  } catch (error) {
+    console.error('Error creating panel status alert:', error);
+    return res.status(500).json({ error: 'Failed to create panel status alert' });
+  }
+});
+
 // Get all fault detections
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -112,6 +190,32 @@ router.get('/zone/:zoneName', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching zone faults:', error);
     res.status(500).json({ error: 'Failed to fetch zone faults' });
+  }
+});
+
+// Delete a fault detection (permanent delete)
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const faultId = req.params.id;
+
+    // Check if the fault exists
+    const existingFault = await prisma.faultDetection.findUnique({
+      where: { id: faultId },
+    });
+
+    if (!existingFault) {
+      return res.status(404).json({ error: 'Fault not found' });
+    }
+
+    // Permanently delete the fault detection
+    await prisma.faultDetection.delete({
+      where: { id: faultId },
+    });
+
+    res.json({ message: 'Fault deleted successfully', deletedId: faultId });
+  } catch (error) {
+    console.error('Error deleting fault:', error);
+    res.status(500).json({ error: 'Failed to delete fault detection' });
   }
 });
 

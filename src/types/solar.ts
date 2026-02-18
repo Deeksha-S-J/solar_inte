@@ -200,6 +200,11 @@ export interface SolarScan {
   
   // Relations
   panelDetections: PanelDetection[];
+
+  // Optional live Pi report fields (from pi_analysis_result payload)
+  piReport?: PiReport;
+  thermalFault?: string | null;
+  baselineDelta?: number | null;
   
   createdAt: string;
   updatedAt: string;
@@ -226,6 +231,10 @@ export interface PiReport {
   summary: string;
   root_cause: string;
   impact_assessment: string;
+  source?: string;
+  baseline_aware?: boolean;
+  deviation_from_baseline?: string;
+  genai_insights?: string;
 }
 
 export interface PiRgbStats {
@@ -254,12 +263,24 @@ export interface PiAnalysisResult {
   thermal_b64?: string;
   thermal_image_web?: string | null;
   thermal?: {
+    fault?: string | null;
     min_temp?: number | null;
     max_temp?: number | null;
     mean_temp?: number | null;
     delta?: number | null;
     risk_score?: number | null;
     severity?: ScanSeverity | null;
+    baseline_delta?: number | null;
+  };
+  thermal_stats?: {
+    fault?: string | null;
+    min_temp?: number | null;
+    max_temp?: number | null;
+    mean_temp?: number | null;
+    delta?: number | null;
+    risk_score?: number | null;
+    severity?: ScanSeverity | null;
+    baseline_delta?: number | null;
   };
   panel_crops: PiPanelCrop[];
 }
@@ -276,19 +297,20 @@ export function convertPiResultToSolarScan(piResult: PiAnalysisResult): SolarSca
   else if (piResult.report.health_score < 50) severity = 'HIGH';
   else if (piResult.report.health_score < 75) severity = 'MODERATE';
   
-  const thermalRisk = piResult.thermal?.risk_score ?? (100 - piResult.report.health_score);
+  const thermal = piResult.thermal_stats ?? piResult.thermal;
+  const thermalRisk = thermal?.risk_score ?? (100 - piResult.report.health_score);
   return {
     id: `pi-${piResult.capture_id}`,
     backendId: piResult.id,
     timestamp: piResult.received_at || piResult.timestamp,
     priority: piResult.report.priority,
     status: 'pending',
-    thermalMinTemp: piResult.thermal?.min_temp ?? null,
-    thermalMaxTemp: piResult.thermal?.max_temp ?? null,
-    thermalMeanTemp: piResult.thermal?.mean_temp ?? null,
-    thermalDelta: piResult.thermal?.delta ?? null,
+    thermalMinTemp: thermal?.min_temp ?? null,
+    thermalMaxTemp: thermal?.max_temp ?? null,
+    thermalMeanTemp: thermal?.mean_temp ?? null,
+    thermalDelta: thermal?.delta ?? null,
     riskScore: thermalRisk,
-    severity: piResult.thermal?.severity ?? severity,
+    severity: thermal?.severity ?? severity,
     thermalImageUrl: piResult.thermal_image_web || null,
     rgbImageUrl: piResult.main_image_web || null,
     dustyPanelCount: dustyCount,
@@ -311,6 +333,9 @@ export function convertPiResultToSolarScan(piResult: PiAnalysisResult): SolarSca
       solarPanelId: null,
       createdAt: piResult.received_at || new Date().toISOString(),
     })),
+    piReport: piResult.report,
+    thermalFault: thermal?.fault ?? null,
+    baselineDelta: thermal?.baseline_delta ?? null,
     createdAt: piResult.received_at || new Date().toISOString(),
     updatedAt: piResult.received_at || new Date().toISOString(),
   };
