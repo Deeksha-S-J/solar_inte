@@ -45,6 +45,10 @@ interface TicketFromAPI {
   recommendedAction: string;
   resolutionNotes: string | null;
   resolutionCause: string | null;
+  droneImageUrl: string | null;
+  thermalImageUrl: string | null;
+  zone: string | null;  // Zone name (e.g., "A", "B")
+  row: number | null;   // Row number
   notes: Array<{
     id: string;
     authorId: string;
@@ -150,6 +154,15 @@ export default function Tickets() {
     return formatDistanceToNow(new Date(dateStr), { addSuffix: true });
   };
   const getPanelId = (ticket: TicketFromAPI) => {
+    // If zone and row are available (from alert-based tickets), show those
+    if (ticket.zone && ticket.row !== null) {
+      return `Zone ${ticket.zone}, Row ${ticket.row}`;
+    }
+    // Fallback: try to get from panel data (for existing tickets)
+    if (ticket.panel?.zone?.name && ticket.panel?.row !== undefined) {
+      return `Zone ${ticket.panel.zone.name}, Row ${ticket.panel.row}`;
+    }
+    // Fallback to panel ID
     if (ticket.panelId) return ticket.panelId;
     if (ticket.panel?.panelId) return ticket.panel.panelId;
     return 'N/A';
@@ -496,6 +509,36 @@ export default function Tickets() {
                   <div className="mt-4 pt-4 border-t">
                     <p className="text-sm">{ticket.description}</p>
                   </div>
+
+                  {/* Scan Images Thumbnails */}
+                  {(ticket.droneImageUrl || ticket.thermalImageUrl) && (
+                    <div className="mt-4 flex gap-2">
+                      {ticket.droneImageUrl && (
+                        <div className="relative w-16 h-16 rounded overflow-hidden border">
+                          <img 
+                            src={ticket.droneImageUrl} 
+                            alt="Drone" 
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[8px] px-1 text-center">
+                            Drone
+                          </div>
+                        </div>
+                      )}
+                      {ticket.thermalImageUrl && (
+                        <div className="relative w-16 h-16 rounded overflow-hidden border">
+                          <img 
+                            src={ticket.thermalImageUrl} 
+                            alt="Thermal" 
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[8px] px-1 text-center">
+                            Thermal
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Notes indicator */}
                   {ticket.notes && ticket.notes.length > 0 && (

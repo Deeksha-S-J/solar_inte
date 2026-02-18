@@ -16,7 +16,7 @@ import type { WeatherData } from '@/types/solar';
 import { Button } from '@/components/ui/button';
 
 // Default sample metrics when API is unavailable
-const defaultMetrics: DashboardMetrics = {
+const emptyMetrics: DashboardMetrics = {
   totalPanels: 0,
   healthyPanels: 0,
   warningPanels: 0,
@@ -29,51 +29,15 @@ const defaultMetrics: DashboardMetrics = {
   openTickets: 0,
 };
 
-// Default sample weather when API is unavailable
-const defaultWeather: WeatherData = {
-  id: 'sample',
-  temperature: 28,
+// Empty sample weather when API is unavailable
+const emptyWeather: WeatherData = {
+  id: '',
+  temperature: 0,
   condition: 'sunny',
-  humidity: 45,
-  sunlightIntensity: 85,
+  humidity: 0,
+  sunlightIntensity: 0,
   recordedAt: new Date().toISOString(),
-  windSpeed: 12,
-  uvIndex: 8,
-  forecast: [
-    { hour: 12, temperature: 28, condition: 'sunny', sunlightIntensity: 80 },
-    { hour: 15, temperature: 30, condition: 'sunny', sunlightIntensity: 85 },
-    { hour: 18, temperature: 26, condition: 'partly-cloudy', sunlightIntensity: 60 },
-  ],
 };
-
-interface PowerPoint {
-  timestamp: string | Date;
-  value: number;
-}
-
-interface DashboardAnalytics {
-  powerGeneration: {
-    daily: PowerPoint[];
-    weekly: PowerPoint[];
-    monthly: PowerPoint[];
-  };
-}
-
-// Default analytics (empty until API data loads)
-const defaultAnalytics: DashboardAnalytics = {
-  powerGeneration: {
-    daily: [],
-    weekly: [],
-    monthly: [],
-  },
-};
-
-interface DashboardData {
-  metrics: DashboardMetrics;
-  weather: WeatherData;
-  openMeteoWeather: WeatherData | null;
-  analytics: DashboardAnalytics;
-}
 
 interface LiveStatusData {
   totalPanels: number;
@@ -154,18 +118,89 @@ function fetchWithTimeout(url: string, timeoutMs: number = 10000): Promise<Respo
   });
 }
 
+interface PowerPoint {
+  timestamp: string | Date;
+  value: number;
+}
+
+interface DashboardAnalytics {
+  powerGeneration: {
+    daily: PowerPoint[];
+    weekly: PowerPoint[];
+    monthly: PowerPoint[];
+  };
+}
+
+interface DashboardData {
+  metrics: DashboardMetrics;
+  weather: WeatherData;
+  openMeteoWeather: WeatherData | null;
+  analytics: DashboardAnalytics;
+}
+
+// Panel data interface matching PanelGrid API response
+interface PanelData {
+  id: string;
+  panelId: string;
+  row: number;
+  column: number;
+  zone: { id: string; name: string };
+  zoneId: string;
+  status: 'healthy' | 'warning' | 'fault' | 'offline';
+  efficiency: number;
+  currentOutput: number;
+  maxOutput: number;
+  temperature: number;
+  lastChecked: string;
+  installDate: string;
+  inverterGroup: string;
+  stringId: string;
+  sensorDeviceId?: string | null;
+  sensorLastUpdated?: string | null;
+  sensorVoltage?: number | null;
+  sensorCurrentMa?: number | null;
+  sensorPowerMw?: number | null;
+}
+
+interface RowHealthData {
+  panels: PanelData[];
+  rows: Array<{
+    zone: string;
+    row: number;
+    healthy: number;
+    warning: number;
+    fault: number;
+    offline: number;
+    total: number;
+  }>;
+  totals: {
+    healthy: number;
+    warning: number;
+    fault: number;
+    offline: number;
+    total: number;
+  };
+}
+
 export default function Dashboard() {
   console.log('🚀🚀🚀 DASHBOARD COMPONENT LOADED - NEW VERSION 2025 🚀🚀🚀');
   const [data, setData] = useState<DashboardData>({
-    metrics: defaultMetrics,
-    weather: defaultWeather,
+    metrics: emptyMetrics,
+    weather: emptyWeather,
     openMeteoWeather: null,
-    analytics: defaultAnalytics,
+    analytics: {
+      powerGeneration: {
+        daily: [],
+        weekly: [],
+        monthly: [],
+      },
+    },
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [liveStatus, setLiveStatus] = useState<LiveStatusData>(defaultLiveStatus);
+  const [rowHealthData, setRowHealthData] = useState<RowHealthData | null>(null);
   const mountedRef = useRef(true);
 
   // Cleanup on unmount
@@ -199,12 +234,29 @@ export default function Dashboard() {
 
       try {
         console.log('📊 [Dashboard] Fetching metrics from /api/analytics/dashboard');
-        // Fetch all data with individual timeouts
-        const [metricsRes, weatherRes, openMeteoRes, powerDailyRes, powerWeeklyRes, powerMonthlyRes, liveStatusRes] = await Promise.all([
+        
+        // OPTIMIZATION: Fetch critical data first (dashboard metrics, live status)
+        // Then fetch secondary data (weather, power history) in parallel
+        const criticalDataPromises = Promise.all([
           fetchWithTimeout('/api/analytics/dashboard', 10000).catch(e => {
             console.error('❌ Metrics fetch failed:', e);
             return { ok: false } as Response;
           }),
+          fetchWithTimeout('/api/panels/live-status', 10000).catch(e => {
+            console.error('Live status fetch failed:', e);
+            return { ok: false } as Response;
+          }),
+          fetchWithTimeout('/api/panels', 10000).catch(e => {
+            console.error('Panels fetch failed:', e);
+            return { ok: false } as Response;
+          }),
+        ]);
+
+        // Wait for critical data first
+        const [metricsRes, liveStatusRes, rowHealthRes] = await criticalDataPromises;
+        
+        // Then fetch secondary data (weather, power) in parallel - these can load in background
+        const secondaryDataPromises = Promise.all([
           fetchWithTimeout('/api/weather/current', 10000).catch(e => {
             console.error('❌ Weather fetch failed:', e);
             return { ok: false } as Response;
@@ -225,33 +277,115 @@ export default function Dashboard() {
             console.error('❌ Monthly power fetch failed:', e);
             return { ok: false } as Response;
           }),
-          fetchWithTimeout('/api/panels/live-status', 10000).catch(e => {
-            console.error('Live status fetch failed:', e);
-            return { ok: false } as Response;
-          }),
         ]);
+
+        // Fire off secondary data requests but don't await them immediately
+        // This allows the UI to render with critical data first
+        secondaryDataPromises.then(async ([weatherRes, openMeteoRes, powerDailyRes, powerWeeklyRes, powerMonthlyRes]) => {
+          if (!mountedRef.current) return;
+          
+          try {
+            // Process weather data
+            let weather = emptyWeather;
+            if (weatherRes.ok) {
+              try {
+                const weatherApi = await weatherRes.json();
+                console.log('✅ [Dashboard] Real weather from API:', weatherApi);
+                weather = {
+                  ...weatherApi,
+                  windSpeed: weatherApi.windSpeed || 0,
+                  uvIndex: Math.floor((weatherApi.sunlightIntensity || 0) / 10),
+                  forecast: weatherApi.forecast || [],
+                };
+              } catch (e) {
+                console.warn('Failed to parse weather response:', e);
+              }
+            }
+
+            let openMeteoWeather: WeatherData | null = null;
+            if (openMeteoRes.ok) {
+              try {
+                const openMeteoApi = await openMeteoRes.json();
+                openMeteoWeather = {
+                  ...openMeteoApi,
+                  windSpeed: openMeteoApi.windSpeed || 0,
+                  uvIndex: Math.floor((openMeteoApi.sunlightIntensity || 0) / 10),
+                  forecast: openMeteoApi.forecast || [],
+                };
+              } catch (e) {
+                console.warn('Failed to parse Open-Meteo response:', e);
+                openMeteoWeather = null;
+              }
+            }
+
+            let powerDaily: PowerPoint[] = [];
+            let powerWeekly: PowerPoint[] = [];
+            let powerMonthly: PowerPoint[] = [];
+
+            if (powerDailyRes.ok) {
+              try { 
+                powerDaily = await powerDailyRes.json(); 
+                console.log('✅ [Dashboard] Daily power data:', powerDaily.length, 'points');
+              } catch (e) { 
+                console.warn('Failed to parse daily power data:', e); 
+              }
+            }
+            if (powerWeeklyRes.ok) {
+              try { 
+                powerWeekly = await powerWeeklyRes.json(); 
+                console.log('✅ [Dashboard] Weekly power data:', powerWeekly.length, 'points');
+              } catch (e) { 
+                console.warn('Failed to parse weekly power data:', e); 
+              }
+            }
+            if (powerMonthlyRes.ok) {
+              try { 
+                powerMonthly = await powerMonthlyRes.json(); 
+                console.log('✅ [Dashboard] Monthly power data:', powerMonthly.length, 'points');
+              } catch (e) { 
+                console.warn('Failed to parse monthly power data:', e); 
+              }
+            }
+
+            // Update state with secondary data (keep existing metrics/live status)
+            setData(prev => ({
+              ...prev,
+              weather,
+              openMeteoWeather,
+              analytics: {
+                powerGeneration: {
+                  daily: powerDaily,
+                  weekly: powerWeekly,
+                  monthly: powerMonthly,
+                },
+              },
+            }));
+          } catch (err) {
+            console.warn('Secondary data fetch error:', err);
+          }
+        }).catch(console.error);
 
         clearTimeout(overallTimeoutId);
 
         if (!mountedRef.current) return;
 
-        // IMPORTANT: Fetch real metrics data or use defaults
-        let metrics = defaultMetrics;
+        // IMPORTANT: Fetch real metrics data or use empty values
+        let metrics = emptyMetrics;
         if (metricsRes.ok) {
           try {
             const fetchedMetrics = await metricsRes.json();
             console.log('✅ [Dashboard] Real metrics from API:', fetchedMetrics);
             metrics = {
-              totalPanels: fetchedMetrics.totalPanels ?? defaultMetrics.totalPanels,
-              healthyPanels: fetchedMetrics.healthyPanels ?? defaultMetrics.healthyPanels,
-              warningPanels: fetchedMetrics.warningPanels ?? defaultMetrics.warningPanels,
-              faultPanels: fetchedMetrics.faultPanels ?? defaultMetrics.faultPanels,
-              offlinePanels: fetchedMetrics.offlinePanels ?? defaultMetrics.offlinePanels,
-              currentGeneration: fetchedMetrics.currentGeneration ?? defaultMetrics.currentGeneration,
-              maxCapacity: fetchedMetrics.maxCapacity ?? defaultMetrics.maxCapacity,
-              efficiency: fetchedMetrics.efficiency ?? defaultMetrics.efficiency,
-              availableTechnicians: fetchedMetrics.availableTechnicians ?? defaultMetrics.availableTechnicians,
-              openTickets: fetchedMetrics.openTickets ?? defaultMetrics.openTickets,
+              totalPanels: fetchedMetrics.totalPanels ?? emptyMetrics.totalPanels,
+              healthyPanels: fetchedMetrics.healthyPanels ?? emptyMetrics.healthyPanels,
+              warningPanels: fetchedMetrics.warningPanels ?? emptyMetrics.warningPanels,
+              faultPanels: fetchedMetrics.faultPanels ?? emptyMetrics.faultPanels,
+              offlinePanels: fetchedMetrics.offlinePanels ?? emptyMetrics.offlinePanels,
+              currentGeneration: fetchedMetrics.currentGeneration ?? emptyMetrics.currentGeneration,
+              maxCapacity: fetchedMetrics.maxCapacity ?? emptyMetrics.maxCapacity,
+              efficiency: fetchedMetrics.efficiency ?? emptyMetrics.efficiency,
+              availableTechnicians: fetchedMetrics.availableTechnicians ?? emptyMetrics.availableTechnicians,
+              openTickets: fetchedMetrics.openTickets ?? emptyMetrics.openTickets,
             };
             console.log('✅ [Dashboard] Transformed metrics:', metrics);
           } catch (e) {
@@ -261,67 +395,7 @@ export default function Dashboard() {
           console.warn('❌ [Dashboard] Metrics API returned not ok:', metricsRes.status);
         }
 
-        let weather = defaultWeather;
-        if (weatherRes.ok) {
-          try {
-            const weatherApi = await weatherRes.json();
-            console.log('✅ [Dashboard] Real weather from API:', weatherApi);
-            weather = {
-              ...weatherApi,
-              windSpeed: weatherApi.windSpeed || 0,
-              uvIndex: Math.floor((weatherApi.sunlightIntensity || 0) / 10),
-              forecast: weatherApi.forecast || [],
-            };
-          } catch (e) {
-            console.warn('Failed to parse weather response:', e);
-          }
-        }
-
-        let openMeteoWeather: WeatherData | null = null;
-        if (openMeteoRes.ok) {
-          try {
-            const openMeteoApi = await openMeteoRes.json();
-            openMeteoWeather = {
-              ...openMeteoApi,
-              windSpeed: openMeteoApi.windSpeed || 0,
-              uvIndex: Math.floor((openMeteoApi.sunlightIntensity || 0) / 10),
-              forecast: openMeteoApi.forecast || [],
-            };
-          } catch (e) {
-            console.warn('Failed to parse Open-Meteo response:', e);
-            openMeteoWeather = null;
-          }
-        }
-
-        let powerDaily: PowerPoint[] = [];
-        let powerWeekly: PowerPoint[] = [];
-        let powerMonthly: PowerPoint[] = [];
-
-        if (powerDailyRes.ok) {
-          try { 
-            powerDaily = await powerDailyRes.json(); 
-            console.log('✅ [Dashboard] Daily power data:', powerDaily.length, 'points');
-          } catch (e) { 
-            console.warn('Failed to parse daily power data:', e); 
-          }
-        }
-        if (powerWeeklyRes.ok) {
-          try { 
-            powerWeekly = await powerWeeklyRes.json(); 
-            console.log('✅ [Dashboard] Weekly power data:', powerWeekly.length, 'points');
-          } catch (e) { 
-            console.warn('Failed to parse weekly power data:', e); 
-          }
-        }
-        if (powerMonthlyRes.ok) {
-          try { 
-            powerMonthly = await powerMonthlyRes.json(); 
-            console.log('✅ [Dashboard] Monthly power data:', powerMonthly.length, 'points');
-          } catch (e) { 
-            console.warn('Failed to parse monthly power data:', e); 
-          }
-        }
-
+        let powerHistory30s: LivePowerPoint[] = [];
         let liveMetricsPatch: Partial<DashboardMetrics> = {};
         if (liveStatusRes.ok) {
           try {
@@ -346,6 +420,7 @@ export default function Dashboard() {
               devices: Array.isArray(statusData.devices) ? statusData.devices : [],
               powerHistory30s: Array.isArray(statusData.powerHistory30s) ? statusData.powerHistory30s : [],
             };
+            powerHistory30s = parsedLiveStatus.powerHistory30s;
             setLiveStatus(parsedLiveStatus);
             liveMetricsPatch = {
               totalPanels: parsedLiveStatus.totalPanels,
@@ -362,25 +437,95 @@ export default function Dashboard() {
         } else {
           setLiveStatus(defaultLiveStatus);
         }
+
+        // Parse panel data and calculate totals and rows
+        if (rowHealthRes.ok) {
+          try {
+            const panels = await rowHealthRes.json();
+            if (Array.isArray(panels)) {
+              // Group panels by zone and row to get row data
+              const rowMap = new Map<string, { zone: string; row: number; healthy: number; warning: number; fault: number; offline: number; total: number }>();
+              panels.forEach((panel: PanelData) => {
+                const zoneName = panel.zone?.name || 'unknown';
+                const key = `${zoneName}-${panel.row}`;
+                
+                if (!rowMap.has(key)) {
+                  rowMap.set(key, { zone: zoneName, row: panel.row, healthy: 0, warning: 0, fault: 0, offline: 0, total: 0 });
+                }
+                
+                const row = rowMap.get(key)!;
+                row.total++;
+                
+                switch (panel.status) {
+                  case 'healthy':
+                    row.healthy++;
+                    break;
+                  case 'warning':
+                    row.warning++;
+                    break;
+                  case 'fault':
+                    row.fault++;
+                    break;
+                  case 'offline':
+                    row.offline++;
+                    break;
+                  default:
+                    row.offline++;
+                }
+              });
+
+              const rows = Array.from(rowMap.values()).sort((a, b) => {
+                if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
+                return a.row - b.row;
+              });
+
+              // Calculate totals based on ROWS, not panels
+              // A row is "fault" if it has any fault panels
+              // A row is "warning" if it has warning panels (but no fault)
+              // A row is "healthy" if all panels are healthy
+              // A row is "offline" if all panels are offline or if zone B (showcase only)
+              const totals = {
+                healthy: rows.filter(r => r.fault === 0 && r.warning === 0 && r.offline < r.total && r.total > 0).length,
+                warning: rows.filter(r => r.warning > 0 && r.fault === 0).length,
+                fault: rows.filter(r => r.fault > 0).length,
+                offline: rows.filter(r => r.offline === r.total || r.total === 0).length,
+                total: rows.length,
+              };
+
+              setRowHealthData({ panels, rows, totals });
+              console.log('✅ [Dashboard] Row totals calculated:', { totals, rowsCount: rows.length });
+            }
+          } catch (e) {
+            console.warn('Failed to parse panel data:', e);
+          }
+        }
+        const dailyPowerForChart: PowerPoint[] =
+          powerHistory30s.length > 0
+            ? powerHistory30s.map((point) => ({
+                timestamp: point.timestamp,
+                value: point.totalPowerKw,
+              }))
+            : data.analytics.powerGeneration.daily;
         const mergedMetrics: DashboardMetrics = {
           ...metrics,
           ...liveMetricsPatch,
         };
 
-        // Update state with fetched data
+        // Update state with fetched critical data
+        // Weather and power data will be updated separately when available
         console.log('📊 [Dashboard] Setting state with new data');
-        setData({
+        setData(prev => ({
           metrics: mergedMetrics,
-          weather,
-          openMeteoWeather,
+          weather: prev.weather, // Keep existing weather data
+          openMeteoWeather: prev.openMeteoWeather, // Keep existing Open-Meteo data
           analytics: {
             powerGeneration: {
-              daily: powerDaily,
-              weekly: powerWeekly,
-              monthly: powerMonthly,
+              daily: dailyPowerForChart,
+              weekly: prev.analytics.powerGeneration.weekly,
+              monthly: prev.analytics.powerGeneration.monthly,
             },
           },
-        });
+        }));
         
         console.log('✅ [Dashboard] Data state updated successfully');
         setError(null);
@@ -555,11 +700,8 @@ export default function Dashboard() {
             monthly={analytics.powerGeneration.monthly}
           />
           <PanelHealthOverview
-            healthy={metrics.healthyPanels}
-            warning={metrics.warningPanels}
-            fault={metrics.faultPanels}
-            offline={metrics.offlinePanels}
-            total={metrics.totalPanels}
+            rows={rowHealthData?.rows || []}
+            totals={rowHealthData?.totals || { healthy: 0, warning: 0, fault: 0, offline: 0, total: 0 }}
           />
         </div>
 

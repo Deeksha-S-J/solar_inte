@@ -16,6 +16,7 @@ async function main() {
   await prisma.ticketNote.deleteMany();
   await prisma.ticket.deleteMany();
   await prisma.faultDetection.deleteMany();
+  await prisma.automationEvent.deleteMany();
   await prisma.espSensorReading.deleteMany();
   await prisma.espDevice.deleteMany();
   await prisma.solarPanel.deleteMany();
@@ -86,6 +87,7 @@ async function main() {
     { name: 'David Rodriguez', email: 'david.rodriguez@solarfarm.com', status: 'available' as const },
     { name: 'Emily Park', email: 'emily.park@solarfarm.com', status: 'offline' as const },
     { name: 'James Wilson', email: 'james.wilson@solarfarm.com', status: 'available' as const },
+    { name: 'Deeksha Sharma', email: 'deeksha.sharma@solarfarm.com', status: 'available' as const },
   ];
 
   let techCreated = 0;
@@ -108,6 +110,38 @@ async function main() {
     }
   }
   console.log(`Created ${techCreated} new technicians`);
+
+  // Get Deeksha's ID for ticket assignment
+  const deeksha = await prisma.technician.findUnique({
+    where: { email: 'deeksha.sharma@solarfarm.com' },
+  });
+
+  // Create sample tickets
+  if (deeksha) {
+    const ticketCount = await prisma.ticket.count();
+    if (ticketCount === 0) {
+      const panels = await prisma.solarPanel.findMany({ take: 4 });
+      const statuses = ['open', 'in_progress', 'open', 'open'];
+      const priorities = ['high', 'medium', 'low', 'critical'];
+      
+      for (let i = 0; i < 4 && i < panels.length; i++) {
+        await prisma.ticket.create({
+          data: {
+            ticketNumber: `TK-${String(i + 1).padStart(3, '0')}`,
+            status: statuses[i],
+            priority: priorities[i],
+            description: `Maintenance required for panel ${panels[i].panelId}`,
+            faultType: ['Hot Spot', 'Dust Accumulation', ' wiring Issue', 'Inverter Fault'][i],
+            assignedTechnicianId: deeksha.id,
+            panelId: panels[i].id,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+      }
+      console.log('Created 4 sample tickets assigned to Deeksha');
+    }
+  }
 
   const now = new Date();
   const earliestTimestamp = new Date(now.getTime() - 23 * 60 * 60 * 1000);

@@ -9,6 +9,18 @@ const DEFAULT_LAT = 12.9719;
 const DEFAULT_LON = 77.5937;
 const SENSOR_WEATHER_MAX_AGE_MS = Number(process.env.SENSOR_WEATHER_MAX_AGE_MS ?? 10 * 60 * 1000);
 
+// OPTIMIZATION: In-memory cache for Open-Meteo API responses
+// This prevents calling external API on every request
+interface WeatherCacheItem {
+  data: unknown;
+  timestamp: number;
+}
+
+const WEATHER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
+// Use unknown type to avoid complex type issues
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let openMeteoCache: { data: any; timestamp: number } | null = null;
+
 // Map Open-Meteo weather codes to our app's conditions
 const mapWeatherCode = (code: number): string => {
   // WMO Weather interpretation codes (WW)
@@ -25,6 +37,13 @@ const mapWeatherCode = (code: number): string => {
 };
 
 const fetchOpenMeteoData = async () => {
+  // Check cache first
+  const now = Date.now();
+  if (openMeteoCache !== null && (now - openMeteoCache.timestamp) < WEATHER_CACHE_TTL_MS) {
+    console.log('📦 [Weather] Returning cached Open-Meteo data');
+    return openMeteoCache.data;
+  }
+
   try {
     // Using parameters from user's example for more accurate data
     const params = {
@@ -117,7 +136,7 @@ const fetchOpenMeteoData = async () => {
       utcOffset
     );
     
-    return {
+    const result = {
       temperature: Math.round(temperature * 10) / 10,
       condition: mapWeatherCode(weatherCode),
       humidity: Math.round(humidity),
@@ -128,6 +147,14 @@ const fetchOpenMeteoData = async () => {
       description: getWeatherDescription(weatherCode),
       forecast,
     };
+    
+    // Update cache with new data
+    openMeteoCache = {
+      data: result,
+      timestamp: Date.now()
+    };
+    
+    return result;
   } catch (error) {
     console.error('Error fetching Open-Meteo data:', error);
     return null;

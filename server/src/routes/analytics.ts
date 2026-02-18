@@ -155,6 +155,81 @@ router.get('/faults', async (req: Request, res: Response) => {
   }
 });
 
+// Get row health overview (replaces panel health for dashboard)
+router.get('/rows/health', async (_req: Request, res: Response) => {
+  try {
+    // Get all panels with their zone info
+    const panels = await prisma.solarPanel.findMany({
+      select: {
+        id: true,
+        row: true,
+        column: true,
+        status: true,
+        zone: { select: { name: true } },
+      },
+      orderBy: [{ zone: { name: 'asc' } }, { row: 'asc' }, { column: 'asc' }],
+    });
+
+    // Group by zone and row
+    const rowMap = new Map<string, { zone: string; row: number; healthy: number; warning: number; fault: number; offline: number; total: number }>();
+
+    panels.forEach(panel => {
+      const zoneName = panel.zone?.name || 'unknown';
+      const key = `${zoneName}-${panel.row}`;
+      
+      if (!rowMap.has(key)) {
+        rowMap.set(key, { zone: zoneName, row: panel.row, healthy: 0, warning: 0, fault: 0, offline: 0, total: 0 });
+      }
+      
+      const row = rowMap.get(key)!;
+      row.total++;
+      
+      switch (panel.status) {
+        case 'healthy':
+          row.healthy++;
+          break;
+        case 'warning':
+          row.warning++;
+          break;
+        case 'fault':
+          row.fault++;
+          break;
+        case 'offline':
+          row.offline++;
+          break;
+        default:
+          row.offline++;
+      }
+    });
+
+    // Convert to array and sort
+    const rows = Array.from(rowMap.values()).sort((a, b) => {
+      if (a.zone !== b.zone) return a.zone.localeCompare(b.zone);
+      return a.row - b.row;
+    });
+
+    // Calculate totals
+    const totals = rows.reduce(
+      (acc, row) => ({
+        healthy: acc.healthy + row.healthy,
+        warning: acc.warning + row.warning,
+        fault: acc.fault + row.fault,
+        offline: acc.offline + row.offline,
+        total: acc.total + row.total,
+      }),
+      { healthy: 0, warning: 0, fault: 0, offline: 0, total: 0 }
+    );
+
+    res.json({
+      rows,
+      totals,
+    });
+  } catch (error) {
+    console.error('Error fetching row health:', error);
+    res.status(500).json({ error: 'Failed to fetch row health data' });
+  }
+});
+
 // Get dashboard summary - FULL Dashboard data
 router.get('/dashboard', async (_req: Request, res: Response) => {
   try {
@@ -175,7 +250,7 @@ router.get('/dashboard', async (_req: Request, res: Response) => {
       prisma.solarPanel.count({ where: { status: 'fault' } }),
       prisma.solarPanel.count({ where: { status: 'offline' } }),
       prisma.solarPanel.aggregate({ _sum: { currentOutput: true } }),
-      prisma.ticket.count({ where: { status: { in: ['open', 'in_progress'] } } }),
+      prisma.ticket.count({ where: { status: { in: ['open', 'in_progress', 'resolved'] } } }),
       prisma.technician.count({ where: { status: 'available' } }),
       prisma.faultDetection.count({
         where: {

@@ -1,0 +1,197 @@
+is in {
+  "name": "Solar Farm Voltage Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM \"EspSensorReading\"\nORDER BY \"recordedAt\" DESC\nLIMIT 3",
+        "options": {}
+      },
+      "id": "query-esp-readings",
+      "name": "Read ESP Sensor Readings",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1.4,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Neon PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Voltage anomaly detection\nconst items = $input.all();\nconst readings = items.map(item => item.json);\n\nif (readings.length === 0) {\n  return [{json: {faulty_row: '', avg_voltage: 0}}];\n}\n\n// Calculate average voltage\nconst voltages = readings.map(r => r.voltage);\nconst avgVoltage = voltages.reduce((a, b) => a + b, 0) / voltages.length;\n\n// Find faulty readings (less than 90% of average)\nconst threshold = avgVoltage * 0.9;\nconst faultyRows = [];\n\nreadings.forEach((r, index) => {\n  if (r.voltage < threshold) {\n    faultyRows.push('ROW' + (index + 1));\n  }\n});\n\nconst faultyRow = faultyRows.length > 0 ? faultyRows.join(' | ') : '';\n\nreturn [{\n  json: {\n    faulty_row: faultyRow,\n    avg_voltage: avgVoltage\n  }\n}];"
+      },
+      "id": "voltage-anomaly",
+      "name": "Voltage Anomaly Detection",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.faulty_row }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-fault-detected",
+      "name": "IF - Fault Detected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT *\nFROM \"Technician\"\nWHERE status='available'\nORDER BY \"activeTickets\" ASC\nLIMIT 1",
+        "options": {}
+      },
+      "id": "query-technician",
+      "name": "Query Available Technician",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1.4,
+      "position": [1250, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Neon PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare ticket creation data\nconst anomalyData = $input.first().json;\nconst technician = $input.last().json[0];\n\nif (!technician) {\n  return [];\n}\n\nconst ticketNumber = 'TCK-' + Date.now();\nconst description = 'Low voltage detected at ' + anomalyData.faulty_row;\n\nreturn [{\n  json: {\n    ticketNumber: ticketNumber,\n    status: 'open',\n    priority: 'high',\n    description: description,\n    faultType: 'Voltage Drop',\n    assignedTechnicianId: technician.id,\n    technicianName: technician.name,\n    technicianEmail: technician.email,\n    avgVoltage: anomalyData.avg_voltage,\n    createdAt: new Date().toISOString(),\n    updatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "prepare-ticket",
+      "name": "Prepare Ticket Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO \"Ticket\" (\"id\", \"ticketNumber\", \"status\", \"priority\", \"description\", \"faultType\", \"assignedTechnicianId\", \"createdAt\", \"updatedAt\") VALUES (gen_random_uuid(), '{{ $json.ticketNumber }}', '{{ $json.status }}', '{{ $json.priority }}', '{{ $json.description }}', '{{ $json.faultType }}', '{{ $json.assignedTechnicianId }}', NOW(), NOW()) RETURNING *;",
+        "options": {}
+      },
+      "id": "create-ticket",
+      "name": "Create Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1.4,
+      "position": [1700, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Neon PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/webhook/n8n-webhook",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ticketNumber",
+              "value": "={{ $json.ticketNumber }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status }}"
+            },
+            {
+              "name": "priority",
+              "value": "={{ $json.priority }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "faultType",
+              "value": "={{ $json.faultType }}"
+            },
+            {
+              "name": "technicianName",
+              "value": "={{ $json.technicianName }}"
+            },
+            {
+              "name": "technicianEmail",
+              "value": "={{ $json.technicianEmail }}"
+            },
+            {
+              "name": "avgVoltage",
+              "value": "={{ $json.avgVoltage }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-webhook",
+      "name": "Send to Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1950, 200]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{"node": "Read ESP Sensor Readings", "type": "main", "index": 0}]]
+    },
+    "Read ESP Sensor Readings": {
+      "main": [[{"node": "Voltage Anomaly Detection", "type": "main", "index": 0}]]
+    },
+    "Voltage Anomaly Detection": {
+      "main": [[{"node": "IF - Fault Detected", "type": "main", "index": 0}]]
+    },
+    "IF - Fault Detected": {
+      "main": [
+        [{"node": "Query Available Technician", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Query Available Technician": {
+      "main": [[{"node": "Prepare Ticket Data", "type": "main", "index": 0}]]
+    },
+    "Prepare Ticket Data": {
+      "main": [[{"node": "Create Ticket", "type": "main", "index": 0}]]
+    },
+    "Create Ticket": {
+      "main": [[{"node": "Send to Webhook", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-01T00:00:00.000Z",
+  "versionId": "1",
+  "active": false,
+  "id": "solar-farm-voltage-monitor"
+}
+

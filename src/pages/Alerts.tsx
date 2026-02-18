@@ -1,38 +1,47 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { AlertCard } from '@/components/dashboard/AlertCard';
-import type { FaultDetection } from '@/types/solar';
+import type { Alert } from '@/types/solar';
 
 export default function Alerts() {
-    const [faults, setFaults] = useState<FaultDetection[]>([]);
+    const [alerts, setAlerts] = useState<Alert[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        async function fetchFaults() {
+        async function fetchAlerts() {
             try {
-                const response = await fetch('/api/faults');
+                const response = await fetch('/api/alerts');
                 if (response.ok) {
                     const data = await response.json();
-                    const transformed = data.map((f: any) => ({
-                        ...f,
-                        location: { x: f.locationX || 50, y: f.locationY || 50 },
-                        detectedAt: new Date(f.detectedAt),
+                    const transformed = data.map((alert: any) => ({
+                        ...alert,
+                        createdAt: new Date(alert.createdAt),
                     }));
-                    setFaults(transformed);
+                    setAlerts(transformed);
                 }
             } catch (err) {
                 console.warn('API unavailable, showing empty alerts');
-                // Faults remain empty
             } finally {
                 setLoading(false);
             }
         }
 
-        fetchFaults();
+        fetchAlerts();
     }, []);
 
-    const handleDismiss = (faultId: string) => {
-        setFaults(prev => prev.filter(f => f.id !== faultId));
+    const handleDismiss = async (alertId: string) => {
+        try {
+            const response = await fetch(`/api/alerts/${alertId}`, {
+                method: 'DELETE',
+            });
+            if (response.ok) {
+                setAlerts(prev => prev.filter(a => a.id !== alertId));
+            } else {
+                console.error('Failed to delete alert');
+            }
+        } catch (err) {
+            console.error('Error deleting alert:', err);
+        }
     };
 
     if (loading) {
@@ -52,12 +61,12 @@ export default function Alerts() {
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">Active Alerts</h1>
                 <p className="text-muted-foreground">
-                    Monitor and manage fault detections in your solar farm
+                    Monitor and manage alerts from your solar farm
                 </p>
             </div>
 
             {/* Alerts Grid */}
-            {faults.length === 0 ? (
+            {alerts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                     <AlertTriangle className="h-12 w-12 text-muted-foreground mb-4" />
                     <h3 className="text-lg font-semibold">No active alerts</h3>
@@ -65,10 +74,10 @@ export default function Alerts() {
                 </div>
             ) : (
                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                    {faults.map((fault) => (
+                    {alerts.map((alert) => (
                         <AlertCard
-                            key={fault.id}
-                            fault={fault}
+                            key={alert.id}
+                            alert={alert}
                             onDismiss={handleDismiss}
                         />
                     ))}

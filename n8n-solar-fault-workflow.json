@@ -1,0 +1,285 @@
+{
+  "name": "Solar Panel Fault Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "solar-fault-alert",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Solar Fault Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "solar-fault-automation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.severity }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "validate-payload",
+      "name": "IF - Valid Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "enum": [
+            {
+              "value": "={{ $json.severity }}"
+            }
+          ],
+          "options": {
+            "caseSensitive": false
+          }
+        },
+        "comparisonOperations": {
+          "enum": [
+            {
+              "name": "is not equal to",
+              "value": "notEqual"
+            },
+            {
+              "name": "is equal to",
+              "value": "equal"
+            }
+          ]
+        },
+        "value2": "LOW"
+      },
+      "id": "check-severity",
+      "name": "IF - Severity >= MEDIUM",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM \"Technician\"\nWHERE status='available'\nORDER BY \"activeTickets\" ASC\nLIMIT 1",
+        "options": {}
+      },
+      "id": "query-technician",
+      "name": "Query Available Technician",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1.4,
+      "position": [1000, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Neon PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare ticket creation data\nconst webhookData = $input.first().json;\nconst technician = $input.last().json[0];\n\n// Check if technician exists\nif (!technician) {\n  return [];\n}\n\n// Generate ticket number\nconst ticketNumber = 'TCK-' + Date.now();\n\n// Map severity to priority\nconst severityToPriority = {\n  'CRITICAL': 'critical',\n  'HIGH': 'high',\n  'MEDIUM': 'medium',\n  'LOW': 'low'\n};\n\nconst priority = severityToPriority[webhookData.severity] || 'medium';\n\nreturn [{\n  json: {\n    ticketNumber: ticketNumber,\n    panelId: webhookData.panelId,\n    status: 'open',\n    priority: priority,\n    description: webhookData.description,\n    faultType: webhookData.faultType,\n    assignedTechnicianId: technician.id,\n    technicianName: technician.name,\n    technicianEmail: technician.email,\n    technicianPhone: technician.phone,\n    createdAt: new Date().toISOString(),\n    updatedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "prepare-ticket",
+      "name": "Prepare Ticket Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO \"Ticket\" (\n  \"id\",\n  \"ticketNumber\",\n  \"panelId\",\n  \"status\",\n  \"priority\",\n  \"description\",\n  \"faultType\",\n  \"assignedTechnicianId\",\n  \"createdAt\",\n  \"updatedAt\"\n)\nVALUES (\n  gen_random_uuid(),\n  '{{ $json.ticketNumber }}',\n  '{{ $json.panelId }}',\n  '{{ $json.status }}',\n  '{{ $json.priority }}',\n  '{{ $json.description }}',\n  '{{ $json.faultType }}',\n  '{{ $json.assignedTechnicianId }}',\n  NOW(),\n  NOW()\n)\nRETURNING *;",
+        "options": {}
+      },
+      "id": "create-ticket",
+      "name": "Create Ticket in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1.4,
+      "position": [1500, 200],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "Neon PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/webhook/n8n-webhook",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ticketNumber",
+              "value": "={{ $json.ticketNumber }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status }}"
+            },
+            {
+              "name": "priority",
+              "value": "={{ $json.priority }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "faultType",
+              "value": "={{ $json.faultType }}"
+            },
+            {
+              "name": "technicianName",
+              "value": "={{ $json.technicianName }}"
+            },
+            {
+              "name": "technicianEmail",
+              "value": "={{ $json.technicianEmail }}"
+            },
+            {
+              "name": "panelId",
+              "value": "={{ $json.panelId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notify-backend",
+      "name": "Notify Backend API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1750, 200]
+    },
+    {
+      "parameters": {
+        "to": "={{ $json.technicianEmail }}",
+        "subject": "={{ 'New Solar Panel Ticket: ' + $json.faultType + ' - ' + $json.panelId }}",
+        "body": "=<h2>New Solar Panel Fault Ticket</h2>\n<p><strong>Ticket Number:</strong> {{ $json.ticketNumber }}</p>\n<p><strong>Panel ID:</strong> {{ $json.panelId }}</p>\n<p><strong>Priority:</strong> {{ $json.priority | uppercase }}</p>\n<p><strong>Fault Type:</strong> {{ $json.faultType }}</p>\n<p><strong>Description:</strong></p>\n<p>{{ $json.description }}</p>\n<p><em>Please log into the Solar Guardian system to view and manage this ticket.</em></p>",
+        "options": {}
+      },
+      "id": "email-technician",
+      "name": "Email Technician",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [2000, 200],
+      "credentials": {
+        "gmail": {
+          "id": "1",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// No technician available - log for manual assignment\nreturn [{\n  json: {\n    message: 'No available technician found',\n    panelId: $input.first().json.panelId,\n    severity: $input.first().json.severity,\n    faultType: $input.first().json.faultType,\n    description: $input.first().json.description,\n    requiresManualAssignment: true,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "no-tech-log",
+      "name": "Log Manual Assignment Needed",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/api/webhook/n8n-webhook",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ticketNumber",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "status",
+              "value": "unassigned"
+            },
+            {
+              "name": "priority",
+              "value": "={{ $json.severity }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "faultType",
+              "value": "={{ $json.faultType }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notify-backend-no-tech",
+      "name": "Notify - No Tech Available",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1500, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log completion for LOW severity (no action needed)\nreturn [{\n  json: {\n    message: 'Ticket logged - LOW severity, no immediate action required',\n    panelId: $input.first().json.panelId,\n    severity: $input.first().json.severity,\n    faultType: $input.first().json.faultType,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "low-severity-log",
+      "name": "Log Low Severity",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 500]
+    }
+  ],
+  "connections": {
+    "Solar Fault Webhook": {
+      "main": [[{"node": "IF - Valid Payload", "type": "main", "index": 0}]]
+    },
+    "IF - Valid Payload": {
+      "main": [
+        [{"node": "IF - Severity >= MEDIUM", "type": "main", "index": 0}],
+        [{"node": "Log Low Severity", "type": "main", "index": 1}]
+      ]
+    },
+    "IF - Severity >= MEDIUM": {
+      "main": [
+        [{"node": "Query Available Technician", "type": "main", "index": 0}],
+        [{"node": "Log Manual Assignment Needed", "type": "main", "index": 1}]
+      ]
+    },
+    "Query Available Technician": {
+      "main": [[{"node": "Prepare Ticket Data", "type": "main", "index": 0}]]
+    },
+    "Prepare Ticket Data": {
+      "main": [[{"node": "Create Ticket in DB", "type": "main", "index": 0}]]
+    },
+    "Create Ticket in DB": {
+      "main": [
+        [{"node": "Notify Backend API", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Notify Backend API": {
+      "main": [[{"node": "Email Technician", "type": "main", "index": 0}]]
+    },
+    "Log Manual Assignment Needed": {
+      "main": [[{"node": "Notify - No Tech Available", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["solar", "automation", "fault-detection", "tickets"],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-15T00:00:00.000Z",
+  "versionId": "1",
+  "active": false,
+  "id": "solar-panel-fault-automation"
+}
+
