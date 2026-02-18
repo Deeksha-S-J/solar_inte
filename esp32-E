@@ -1,58 +1,62 @@
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_INA219.h>
+#include <Adafruit_SHT31.h>
 
 #define DEVICE_ID "ESP_03"
-#define LED_PIN 2
+#define LED_PIN 2          // 🔥 Safe pin on ESP32
 #define SDA_PIN 21
 #define SCL_PIN 22
 
 const char* ssid = "TP-Link_83B8";
 const char* password = "15400338";
-
-const char* host = "192.168.0.169";
-const int   port = 3000;
-const char* path = "/api/panels/sensor-update";
+const char* serverURL = "http://192.168.0.169:3000/api/panels/sensor-update";
 
 Adafruit_INA219 ina219;
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
 
 unsigned long lastSendTime = 0;
 unsigned long lastBlinkTime = 0;
-unsigned long lastWifiCheck = 0;
-
 bool ledState = false;
-bool inaOK = false;
 
-// ---------------- SAFE VALUE ----------------
 float safeValue(float value) {
-  if (isnan(value) || isinf(value)) return 0.0;
+  if (isnan(value) || isinf(value)) {
+    return 0.0;
+  }
   return value;
 }
 
-// ---------------- SETUP ----------------
 void setup() {
-
-  Serial.begin(115200);
-  delay(1000);
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
-  // Proper I2C init for FireBeetle
+  Serial.begin(115200);
+  delay(2000);
+
+  // 🔹 Proper I2C init for FireBeetle
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(100);
 
-  if (ina219.begin()) {
-    ina219.setCalibration_16V_400mA();
-    inaOK = true;
-    Serial.println("INA219 detected");
+  // INA219
+  if (!ina219.begin()) {
+    Serial.println("INA219 not found");
   } else {
-    Serial.println("INA219 NOT detected");
+    Serial.println("INA219 OK");
+    ina219.setCalibration_16V_400mA();
   }
 
-  // Connect WiFi
+  // SHT31
+  if (!sht31.begin(0x44)) {
+    Serial.println("SHT31 not found");
+  } else {
+    Serial.println("SHT31 OK");
+  }
+
+  // WiFi connect
   WiFi.begin(ssid, password);
-  Serial.print("Connecting");
+  Serial.println("Connecting to WiFi...");
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -64,83 +68,75 @@ void setup() {
   Serial.println(WiFi.localIP());
 }
 
-// ---------------- LOOP ----------------
 void loop() {
 
-  // 🔵 LED Blink (independent)
+  // 🔵 LED Blink
   if (millis() - lastBlinkTime >= 500) {
     lastBlinkTime = millis();
     ledState = !ledState;
     digitalWrite(LED_PIN, ledState);
   }
 
-  // 🔁 WiFi Auto Reconnect
-  if (millis() - lastWifiCheck >= 5000) {
-    lastWifiCheck = millis();
+  // 🟢 Print WiFi Status
+  static unsigned long lastStatusPrint = 0;
+  if (millis() - lastStatusPrint >= 3000) {
+    lastStatusPrint = millis();
 
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("WiFi reconnecting...");
-      WiFi.disconnect();
-      WiFi.begin(ssid, password);
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.print("Connected. IP: ");
+      Serial.println(WiFi.localIP());
+    } else {
+      Serial.println("WiFi not connected...");
     }
   }
 
-  // 📡 Send every 5 seconds
+  // 📡 Send Data Every 5 Seconds
   if (WiFi.status() == WL_CONNECTED && millis() - lastSendTime >= 5000) {
 
     lastSendTime = millis();
 
-    float voltage = 0;
-    float current = 0;
-    float power   = 0;
+    float voltage = safeValue(ina219.getBusVoltage_V());
+    float current = safeValue(ina219.getCurrent_mA());
+    float power   = safeValue(ina219.getPower_mW());
 
-    if (inaOK) {
-      voltage = safeValue(ina219.getBusVoltage_V());
-      current = safeValue(ina219.getCurrent_mA());
-      power   = safeValue(ina219.getPower_mW());
-    }
+    float temperature = safeValue(sht31.readTemperature());
+    float humidity    = safeValue(sht31.readHumidity());
 
-    sendToBackend(voltage, current, power);
+    Serial.println("----- SENSOR DATA -----");
+    Serial.print("Voltage: "); Serial.println(voltage);
+    Serial.print("Current: "); Serial.println(current);
+    Serial.print("Power: "); Serial.println(power);
+    Serial.print("Temperature: "); Serial.println(temperature);
+    Serial.print("Humidity: "); Serial.println(humidity);
+
+    sendToBackend(voltage, current, power, temperature, humidity);
   }
 }
 
-// ---------------- SEND TO BACKEND ----------------
-void sendToBackend(float voltage, float current, float power) {
+void sendToBackend(float voltage, float current, float power,
+                   float temperature, float humidity) {
 
-  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(3000);  // 🔥 prevent blocking
+  http.begin(serverURL);
+  http.addHeader("Content-Type", "application/json");
 
-  if (!client.connect(host, port)) {
-    Serial.println("Server connection failed");
-    return;
-  }
-
-  String payload = "{\"device_id\":\"";
-  payload += DEVICE_ID;
-  payload += "\",\"voltage\":";
-  payload += String(voltage, 3);
-  payload += ",\"current\":";
-  payload += String(current, 2);
-  payload += ",\"power\":";
-  payload += String(power, 2);
+  String payload = "{";
+  payload += "\"device_id\":\"" + String(DEVICE_ID) + "\",";
+  payload += "\"voltage\":" + String(voltage, 3) + ",";
+  payload += "\"current\":" + String(current, 2) + ",";
+  payload += "\"power\":" + String(power, 2) + ",";
+  payload += "\"temperature\":" + String(temperature, 2) + ",";
+  payload += "\"humidity\":" + String(humidity, 2);
   payload += "}";
 
-  // Send HTTP POST
-  client.print("POST ");
-  client.print(path);
-  client.println(" HTTP/1.1");
+  Serial.println("Sending:");
+  Serial.println(payload);
 
-  client.print("Host: ");
-  client.println(host);
+  int httpResponseCode = http.POST(payload);
 
-  client.println("Content-Type: application/json");
-  client.print("Content-Length: ");
-  client.println(payload.length());
-  client.println("Connection: close");
-  client.println();
+  Serial.print("Server Response: ");
+  Serial.println(httpResponseCode);
 
-  client.println(payload);
-
-  client.stop();  // 🔥 Close immediately (no waiting → no WDT)
-
-  Serial.println("Data sent safely");
+  http.end();
 }
