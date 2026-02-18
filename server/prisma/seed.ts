@@ -127,7 +127,7 @@ async function main() {
       for (let i = 0; i < 4 && i < panels.length; i++) {
         await prisma.ticket.create({
           data: {
-            ticketNumber: `TK-${String(i + 1).padStart(3, '0')}`,
+            ticketNumber: `FK-${String(i + 1).padStart(3, '0')}`,
             status: statuses[i],
             priority: priorities[i],
             description: `Maintenance required for panel ${panels[i].panelId}`,

@@ -78,22 +78,30 @@ export const generateTicketNumber = async (): Promise<string> => {
 
     let nextNumber = 1;
     if (latestTicket?.ticketNumber) {
-      // Extract number from formats like FAULT ID-FK-xxx, FK-xxx, TCK-xxx, TK-xxx
-      const match = latestTicket.ticketNumber.match(/FAULT ID-FK-(\d+)/i);
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      } else {
-        // For other formats, start from 1
-        nextNumber = 1;
+      // Extract number from any format: FAULT ID-FK-xxx, FK-xxx, TCK-xxx, TK-xxx
+      // Match patterns like: FAULT ID-FK-001, FK-001, TCK-001, TK-001
+      const patterns = [
+        /FAULT ID-FK-(\d+)/i,
+        /FK-(\d+)/i,
+        /TCK-(\d+)/i,
+        /TK-(\d+)/i,
+      ];
+      
+      for (const pattern of patterns) {
+        const match = latestTicket.ticketNumber.match(pattern);
+        if (match) {
+          nextNumber = parseInt(match[1], 10) + 1;
+          break;
+        }
       }
     }
 
-    // Format as FAULT ID-FK-001, FAULT ID-FK-002, etc.
-    return `FAULT ID-FK-${nextNumber.toString().padStart(3, '0')}`;
+    // Format as FK-001, FK-002, etc. (simplified format to avoid redundancy)
+    return `FK-${nextNumber.toString().padStart(3, '0')}`;
   } catch (error) {
     // Fallback to timestamp-based if database query fails
     console.error('Error generating ticket number, using fallback:', error);
-    return `FAULT ID-FK-${Date.now().toString().slice(-6)}`;
+    return `FK-${Date.now().toString().slice(-6)}`;
   }
 };
 
