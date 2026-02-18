@@ -22,45 +22,84 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const toDate = (timestamp: Date | string) => (timestamp instanceof Date ? timestamp : new Date(timestamp));
 
-  const sampleSeries = <T,>(items: T[], maxPoints: number) => {
-    if (items.length <= maxPoints) return items;
-    const step = Math.ceil(items.length / maxPoints);
-    return items.filter((_, i) => i % step === 0);
+  const toPoints = (items: { timestamp: Date | string; value: number }[]) =>
+    [...items]
+      .map((d) => ({ date: toDate(d.timestamp), value: d.value }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Aggregate points by time bucket so axis labels stay sequential and non-repeating.
+  const aggregateByBucket = (
+    items: { date: Date; value: number }[],
+    keyFn: (date: Date) => string,
+    labelFn: (date: Date) => string
+  ) => {
+    const bucketMap = new Map<string, { label: string; sum: number; count: number; date: Date }>();
+    for (const item of items) {
+      const key = keyFn(item.date);
+      const existing = bucketMap.get(key);
+      if (existing) {
+        existing.sum += item.value;
+        existing.count += 1;
+      } else {
+        bucketMap.set(key, {
+          label: labelFn(item.date),
+          sum: item.value,
+          count: 1,
+          date: item.date,
+        });
+      }
+    }
+
+    return [...bucketMap.values()]
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .map((b) => ({
+        time: b.label,
+        value: b.sum / b.count,
+      }));
   };
 
   const getData = () => {
-    const toPoints = (items: { timestamp: Date | string; value: number }[]) =>
-      [...items]
-        .map((d) => ({ date: toDate(d.timestamp), value: d.value }))
-        .sort((a, b) => a.date.getTime() - b.date.getTime());
-
     switch (period) {
       case 'daily': {
-        const pts = sampleSeries(toPoints(daily), 16);
-        return pts.map((d) => ({
-          time: format(d.date, 'HH:mm'),
-          value: d.value,
-        }));
+        const pts = toPoints(daily);
+        return aggregateByBucket(
+          pts,
+          (d) => format(d, 'yyyy-MM-dd HH'),
+          (d) => format(d, 'HH:mm')
+        );
       }
       case 'weekly': {
-        const pts = sampleSeries(toPoints(weekly), 10);
-        return pts.map((d) => ({
-          time: format(d.date, 'EEE'),
-          value: d.value,
-        }));
+        const pts = toPoints(weekly);
+        return aggregateByBucket(
+          pts,
+          (d) => format(d, 'yyyy-MM-dd'),
+          (d) => format(d, 'EEE')
+        );
       }
       case 'monthly': {
-        const pts = sampleSeries(toPoints(monthly), 8);
-        return pts.map((d) => ({
-          time: format(d.date, 'MMM d'),
-          value: d.value,
+        const pts = toPoints(monthly);
+        const monthSums = new Array<number>(12).fill(0);
+        const monthCounts = new Array<number>(12).fill(0);
+
+        for (const point of pts) {
+          const monthIdx = point.date.getMonth();
+          monthSums[monthIdx] += point.value;
+          monthCounts[monthIdx] += 1;
+        }
+
+        return Array.from({ length: 12 }, (_, monthIdx) => ({
+          time: format(new Date(2000, monthIdx, 1), 'MMM'),
+          value: monthCounts[monthIdx] > 0 ? monthSums[monthIdx] / monthCounts[monthIdx] : 0,
         }));
       }
     }
   };
 
   const data = getData();
-  const xTickAngle = 0;
+  const xTickAngle = period === 'daily' ? -35 : 0;
+  const xTickAnchor = period === 'daily' ? 'end' : 'middle';
+  const xTickHeight = period === 'daily' ? 52 : 28;
+  const xAxisInterval = period === 'daily' ? Math.max(0, Math.ceil(data.length / 10) - 1) : 0;
 
   return (
     <Card>
@@ -91,10 +130,10 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
                 tickLine={false}
                 axisLine={false}
                 angle={xTickAngle}
-                textAnchor="middle"
-                height={28}
-                interval={0}
-                minTickGap={0}
+                textAnchor={xTickAnchor}
+                height={xTickHeight}
+                interval={xAxisInterval}
+                minTickGap={period === 'daily' ? 8 : 0}
                 className="text-muted-foreground"
               />
               <YAxis

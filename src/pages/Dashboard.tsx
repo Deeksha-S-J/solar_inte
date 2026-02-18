@@ -78,25 +78,6 @@ interface LivePowerPoint {
   deviceCount: number;
 }
 
-const defaultLiveStatus: LiveStatusData = {
-  totalPanels: 0,
-  healthyPanels: 0,
-  warningPanels: 0,
-  faultPanels: 0,
-  offlinePanels: 0,
-  currentGenerationKw: 0,
-  avgEfficiency: 0,
-  mappedDevices: 0,
-  reportingDevices: 0,
-  onlineDevices: 0,
-  latestDeviceSeenAt: null,
-  averageVoltage: 0,
-  averageCurrentMa: 0,
-  totalPowerMw: 0,
-  devices: [],
-  powerHistory30s: [],
-};
-
 // Helper function to add timeout to fetch requests
 function fetchWithTimeout(url: string, timeoutMs: number = 10000): Promise<Response> {
   // Add timestamp to prevent caching
@@ -199,7 +180,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
-  const [liveStatus, setLiveStatus] = useState<LiveStatusData>(defaultLiveStatus);
   const [rowHealthData, setRowHealthData] = useState<RowHealthData | null>(null);
   const mountedRef = useRef(true);
 
@@ -395,7 +375,6 @@ export default function Dashboard() {
           console.warn('❌ [Dashboard] Metrics API returned not ok:', metricsRes.status);
         }
 
-        let powerHistory30s: LivePowerPoint[] = [];
         let liveMetricsPatch: Partial<DashboardMetrics> = {};
         if (liveStatusRes.ok) {
           try {
@@ -420,8 +399,6 @@ export default function Dashboard() {
               devices: Array.isArray(statusData.devices) ? statusData.devices : [],
               powerHistory30s: Array.isArray(statusData.powerHistory30s) ? statusData.powerHistory30s : [],
             };
-            powerHistory30s = parsedLiveStatus.powerHistory30s;
-            setLiveStatus(parsedLiveStatus);
             liveMetricsPatch = {
               totalPanels: parsedLiveStatus.totalPanels,
               healthyPanels: parsedLiveStatus.healthyPanels,
@@ -434,8 +411,6 @@ export default function Dashboard() {
           } catch (e) {
             console.warn('Failed to parse live status:', e);
           }
-        } else {
-          setLiveStatus(defaultLiveStatus);
         }
 
         // Parse panel data and calculate totals and rows
@@ -499,13 +474,6 @@ export default function Dashboard() {
             console.warn('Failed to parse panel data:', e);
           }
         }
-        const dailyPowerForChart: PowerPoint[] =
-          powerHistory30s.length > 0
-            ? powerHistory30s.map((point) => ({
-                timestamp: point.timestamp,
-                value: point.totalPowerKw,
-              }))
-            : data.analytics.powerGeneration.daily;
         const mergedMetrics: DashboardMetrics = {
           ...metrics,
           ...liveMetricsPatch,
@@ -520,7 +488,7 @@ export default function Dashboard() {
           openMeteoWeather: prev.openMeteoWeather, // Keep existing Open-Meteo data
           analytics: {
             powerGeneration: {
-              daily: dailyPowerForChart,
+              daily: prev.analytics.powerGeneration.daily,
               weekly: prev.analytics.powerGeneration.weekly,
               monthly: prev.analytics.powerGeneration.monthly,
             },
@@ -569,49 +537,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Data Status Banner */}
-      <div className="rounded-lg border bg-blue-50 dark:bg-blue-950 p-4 mb-4">
-        <div className="text-sm text-blue-700 dark:text-blue-200">
-          <p className="font-semibold">📊 Live Data Status:</p>
-          <p>Total Panels: <span className="font-bold">{liveStatus.totalPanels}</span> | 
-             Healthy: <span className="font-bold text-green-600">{liveStatus.healthyPanels}</span> | 
-             Warning: <span className="font-bold text-yellow-600">{liveStatus.warningPanels}</span> | 
-             Fault: <span className="font-bold text-red-600">{liveStatus.faultPanels}</span></p>
-          <p>Current Generation: <span className="font-bold">{liveStatus.currentGenerationKw.toFixed(2)} kW</span> | 
-             Efficiency: <span className="font-bold">{liveStatus.avgEfficiency.toFixed(1)}%</span></p>
-          <p>ESP Devices: <span className="font-bold">{liveStatus.onlineDevices}/{liveStatus.mappedDevices}</span> online | 
-             Avg Voltage: <span className="font-bold">{liveStatus.averageVoltage.toFixed(2)} V</span> | 
-             Avg Current: <span className="font-bold">{(liveStatus.averageCurrentMa / 1000).toFixed(3)} A</span></p>
-          <p className="text-xs mt-2 text-blue-600 dark:text-blue-300">
-            {liveStatus.latestDeviceSeenAt
-              ? `Last ESP update: ${new Date(liveStatus.latestDeviceSeenAt).toLocaleTimeString()}`
-              : 'Waiting for ESP32 readings...'}
-          </p>
-          <div className="mt-3 grid gap-2 md:grid-cols-3">
-            {liveStatus.devices.map((device) => (
-              <div
-                key={device.deviceId}
-                className={`rounded border px-3 py-2 ${
-                  device.online
-                    ? device.status === 'healthy'
-                      ? 'border-green-300 bg-green-100/60 text-green-900 dark:bg-green-900/30 dark:text-green-200'
-                      : device.status === 'warning'
-                      ? 'border-yellow-300 bg-yellow-100/60 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-200'
-                      : 'border-red-300 bg-red-100/60 text-red-900 dark:bg-red-900/30 dark:text-red-200'
-                    : 'border-slate-300 bg-slate-100/70 text-slate-700 dark:bg-slate-900/40 dark:text-slate-300'
-                }`}
-              >
-                <p className="font-semibold uppercase">{device.label}</p>
-                <p>{device.online ? 'Online' : 'Offline'}</p>
-                <p>V: {device.voltage !== null ? `${device.voltage.toFixed(2)} V` : 'N/A'}</p>
-                <p>I: {device.currentMa !== null ? `${(device.currentMa / 1000).toFixed(3)} A` : 'N/A'}</p>
-                <p>P: {device.powerMw !== null ? `${(device.powerMw / 1000).toFixed(2)} W` : 'N/A'}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       {/* Error/Timeout Banner */}
       {error && (
         <div className="rounded-lg bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 p-4">
@@ -661,7 +586,7 @@ export default function Dashboard() {
         />
         <MetricCard
           title="Current Generation"
-          value={metrics.currentGeneration}
+          value={metrics.currentGeneration / 1000}
           suffix="kW"
           icon={Zap}
           animate={false}

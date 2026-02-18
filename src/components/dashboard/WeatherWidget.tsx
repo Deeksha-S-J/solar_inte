@@ -7,6 +7,14 @@ interface WeatherWidgetProps {
   openMeteoWeather?: WeatherData | null;
 }
 
+const getDisplayCondition = (condition: string, sunlightIntensity: number) => {
+  // Avoid showing sunny-style conditions when there is no sunlight (night).
+  if (sunlightIntensity <= 0 && (condition === 'sunny' || condition === 'partly-cloudy')) {
+    return 'cloudy';
+  }
+  return condition;
+};
+
 const weatherIcons = {
   sunny: Sun,
   cloudy: Cloud,
@@ -17,11 +25,13 @@ const weatherIcons = {
 
 export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps) {
   const DEGREE_C = '\u00B0C';
-  const WeatherIcon = weatherIcons[weather.condition as keyof typeof weatherIcons] ?? CloudSun;
+  const weatherCondition = getDisplayCondition(weather.condition, weather.sunlightIntensity);
+  const WeatherIcon = weatherIcons[weatherCondition as keyof typeof weatherIcons] ?? CloudSun;
   const hasOnlineForecast = !!openMeteoWeather;
   const onlineWeather = openMeteoWeather ?? weather;
+  const onlineCondition = getDisplayCondition(onlineWeather.condition, onlineWeather.sunlightIntensity);
   const OpenMeteoIcon =
-    weatherIcons[onlineWeather.condition as keyof typeof weatherIcons] ?? CloudSun;
+    weatherIcons[onlineCondition as keyof typeof weatherIcons] ?? CloudSun;
 
   return (
     <Card className="overflow-hidden">
@@ -39,9 +49,6 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
             </div>
             <div>
               <div className="text-4xl font-bold">{weather.temperature.toFixed(2)}{DEGREE_C}</div>
-              <div className="text-sm capitalize text-muted-foreground">
-                {String(weather.condition).replace('-', ' ')}
-              </div>
             </div>
           </div>
           <div className="space-y-2 text-right">
@@ -71,7 +78,7 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
               <div>
                 <div className="text-2xl font-semibold">{Math.round(onlineWeather.temperature)}{DEGREE_C}</div>
                 <div className="text-sm capitalize text-muted-foreground">
-                  {String(onlineWeather.condition).replace('-', ' ')}
+                  {String(onlineCondition).replace('-', ' ')}
                 </div>
               </div>
             </div>
