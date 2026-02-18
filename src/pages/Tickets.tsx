@@ -57,6 +57,8 @@ interface TicketFromAPI {
   }>;
   panel?: {
     panelId: string;
+    row?: number;
+    column?: number;
     zone?: { name: string };
   };
   assignedTechnician?: {
@@ -100,6 +102,8 @@ export default function Tickets() {
   const [ticketDetailsOpen, setTicketDetailsOpen] = useState(false);
   const [ticketDetails, setTicketDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [ticketAlertMeta, setTicketAlertMeta] = useState<{ alertId?: string | null; scanId?: string | null } | null>(null);
+  const [ticketScanDetails, setTicketScanDetails] = useState<any>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -147,6 +151,9 @@ export default function Tickets() {
     const technicianMatch = technicianFilter === 'all' || ticket.assignedTechnicianId === technicianFilter;
     return statusMatch && searchMatch && priorityMatch && technicianMatch;
   });
+  const sortedTickets = [...filteredTickets].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 
   const getTechnician = (id?: string | null) => technicians.find(t => t.id === id);
   const getRelativeTime = (dateStr: string | null) => {
@@ -167,11 +174,22 @@ export default function Tickets() {
     if (ticket.panel?.panelId) return ticket.panel.panelId;
     return 'N/A';
   };
+  const getDisplayTicketNumber = (index: number) => `TCK ${String(index + 1).padStart(3, '0')}`;
+  const getDisplayTicketLabel = (ticket: TicketFromAPI, index: number) => {
+    const row = ticket.panel?.row;
+    const column = ticket.panel?.column;
+    if (typeof row === 'number' && typeof column === 'number') {
+      return `ROW ${row} - P${column}`;
+    }
+    return getDisplayTicketNumber(index);
+  };
 
   const handleViewTicket = async (ticket: TicketFromAPI) => {
     setSelectedTicket(ticket);
     setTicketDetailsOpen(true);
     setLoadingDetails(true);
+    setTicketAlertMeta(null);
+    setTicketScanDetails(null);
     try {
       const response = await fetch(`/api/tickets/${ticket.id}`);
       if (response.ok) {
@@ -179,6 +197,26 @@ export default function Tickets() {
         setTicketDetails(details);
       } else {
         setTicketDetails(ticket); // fallback to list data
+      }
+      // Fetch alert meta (alertId + scanId) for this ticket
+      try {
+        const alertsRes = await fetch('/api/alerts');
+        if (alertsRes.ok) {
+          const alerts = await alertsRes.json();
+          const alert = alerts.find((a: any) => a.ticketId === ticket.id);
+          if (alert) {
+            setTicketAlertMeta({ alertId: alert.alertId || null, scanId: alert.scanId || null });
+            if (alert.scanId) {
+              const scanRes = await fetch(`/api/solar-scans/${alert.scanId}`);
+              if (scanRes.ok) {
+                const scan = await scanRes.json();
+                setTicketScanDetails(scan);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch alert/scan details:', err);
       }
     } catch (err) {
       console.error('Failed to fetch ticket details:', err);
@@ -321,7 +359,9 @@ export default function Tickets() {
       <Dialog open={ticketDetailsOpen} onOpenChange={setTicketDetailsOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Ticket Details - {selectedTicket?.ticketNumber}</DialogTitle>
+            <DialogTitle>
+              Ticket Details - {selectedTicket ? getDisplayTicketLabel(selectedTicket, filteredTickets.findIndex(t => t.id === selectedTicket.id)) : ''}
+            </DialogTitle>
           </DialogHeader>
           {loadingDetails ? (
             <div className="flex items-center justify-center py-8">
@@ -364,6 +404,12 @@ export default function Tickets() {
                     {getTechnician(ticketDetails.assignedTechnicianId)?.name || 'Unassigned'}
                   </p>
                 </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Alert ID</label>
+                  <p className="mt-1 font-mono text-xs">
+                    {ticketAlertMeta?.alertId || 'N/A'}
+                  </p>
+                </div>
               </div>
 
               <div>
@@ -385,17 +431,95 @@ export default function Tickets() {
                 </div>
               )}
 
-              {ticketDetails.droneImageUrl && (
+              {(ticketDetails.droneImageUrl || ticketDetails.fault?.droneImageUrl) && (
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Drone Image</label>
-                  <img src={ticketDetails.droneImageUrl} alt="Drone view" className="mt-1 w-full h-32 object-cover rounded-md" />
+                  <img
+                    src={ticketDetails.droneImageUrl || ticketDetails.fault?.droneImageUrl}
+                    alt="Drone view"
+                    className="mt-1 w-full h-32 object-cover rounded-md"
+                  />
                 </div>
               )}
 
-              {ticketDetails.thermalImageUrl && (
+              {(ticketDetails.thermalImageUrl || ticketDetails.fault?.thermalImageUrl) && (
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Thermal Image</label>
-                  <img src={ticketDetails.thermalImageUrl} alt="Thermal view" className="mt-1 w-full h-32 object-cover rounded-md" />
+                  <img
+                    src={ticketDetails.thermalImageUrl || ticketDetails.fault?.thermalImageUrl}
+                    alt="Thermal view"
+                    className="mt-1 w-full h-32 object-cover rounded-md"
+                  />
+                </div>
+              )}
+
+              {ticketScanDetails && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Scan Details</label>
+                    <div className="mt-1 grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Timestamp</span>
+                        <p className="mt-1">{ticketScanDetails.timestamp || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Device ID</span>
+                        <p className="mt-1">{ticketScanDetails.deviceId || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {(ticketScanDetails.rgbImageUrl || ticketScanDetails.thermalImageUrl) && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {ticketScanDetails.rgbImageUrl && (
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Scan RGB</label>
+                          <img
+                            src={ticketScanDetails.rgbImageUrl}
+                            alt="Scan RGB"
+                            className="mt-1 w-full h-40 object-cover rounded-md"
+                          />
+                        </div>
+                      )}
+                      {ticketScanDetails.thermalImageUrl && (
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Scan Thermal</label>
+                          <img
+                            src={ticketScanDetails.thermalImageUrl}
+                            alt="Scan Thermal"
+                            className="mt-1 w-full h-40 object-cover rounded-md"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {Array.isArray(ticketScanDetails.panelDetections) && ticketScanDetails.panelDetections.length > 0 && (
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground">Panel Crops</label>
+                      <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {ticketScanDetails.panelDetections.map((panel: any) => (
+                          <div key={panel.id} className="rounded-md border overflow-hidden">
+                            {panel.cropImageUrl ? (
+                              <img
+                                src={panel.cropImageUrl}
+                                alt={panel.panelNumber}
+                                className="w-full h-24 object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-24 flex items-center justify-center text-xs text-muted-foreground">
+                                No image
+                              </div>
+                            )}
+                            <div className="px-2 py-1 text-xs flex items-center justify-between">
+                              <span>{panel.panelNumber || 'Panel'}</span>
+                              <span className="text-muted-foreground">{panel.status}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -446,7 +570,7 @@ export default function Tickets() {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredTickets.map(ticket => {
+          {sortedTickets.map((ticket, index) => {
             const technician = getTechnician(ticket.assignedTechnicianId);
             const statusKey = ticket.status === 'in_progress' ? 'in-progress' : ticket.status;
             const StatusIcon = statusIcons[ticket.status] || AlertTriangle;
@@ -462,7 +586,8 @@ export default function Tickets() {
                         <StatusIcon className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="font-semibold">{ticket.ticketNumber}</p>
+                        <p className="text-xs font-medium text-muted-foreground">#{index + 1}</p>
+                        <p className="font-semibold">{getDisplayTicketLabel(ticket, index)}</p>
                         <p className="text-sm text-muted-foreground">{ticket.faultType}</p>
                       </div>
                     </div>

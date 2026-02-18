@@ -5,19 +5,33 @@ import type { Alert } from '@/types/solar';
 
 export default function Alerts() {
     const [alerts, setAlerts] = useState<Alert[]>([]);
+    const [ticketNumbersById, setTicketNumbersById] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         async function fetchAlerts() {
             try {
-                const response = await fetch('/api/alerts');
-                if (response.ok) {
-                    const data = await response.json();
+                const [alertsRes, ticketsRes] = await Promise.all([
+                    fetch('/api/alerts'),
+                    fetch('/api/tickets'),
+                ]);
+                if (alertsRes.ok) {
+                    const data = await alertsRes.json();
                     const transformed = data.map((alert: any) => ({
                         ...alert,
                         createdAt: new Date(alert.createdAt),
                     }));
                     setAlerts(transformed);
+                }
+                if (ticketsRes.ok) {
+                    const tickets = await ticketsRes.json();
+                    const ticketMap: Record<string, string> = {};
+                    tickets.forEach((ticket: any) => {
+                        if (ticket?.id && ticket?.ticketNumber) {
+                            ticketMap[ticket.id] = ticket.ticketNumber;
+                        }
+                    });
+                    setTicketNumbersById(ticketMap);
                 }
             } catch (err) {
                 console.warn('API unavailable, showing empty alerts');
@@ -78,6 +92,7 @@ export default function Alerts() {
                         <AlertCard
                             key={alert.id}
                             alert={alert}
+                            ticketNumber={alert.ticketId ? ticketNumbersById[alert.ticketId] : null}
                             onDismiss={handleDismiss}
                         />
                     ))}

@@ -86,8 +86,6 @@ router.get('/', async (req: Request, res: Response) => {
         resolvedAt: true,
         description: true,
         faultType: true,
-        zone: true,
-        row: true,
         droneImageUrl: true,
         thermalImageUrl: true,
         aiAnalysis: true,
