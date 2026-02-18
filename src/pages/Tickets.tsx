@@ -102,7 +102,7 @@ export default function Tickets() {
   const [ticketDetailsOpen, setTicketDetailsOpen] = useState(false);
   const [ticketDetails, setTicketDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [ticketAlertMeta, setTicketAlertMeta] = useState<{ alertId?: string | null; scanId?: string | null } | null>(null);
+  const [ticketAlertMeta, setTicketAlertMeta] = useState<{ scanId?: string | null } | null>(null);
   const [ticketScanDetails, setTicketScanDetails] = useState<any>(null);
 
   useEffect(() => {
@@ -174,7 +174,12 @@ export default function Tickets() {
     if (ticket.panel?.panelId) return ticket.panel.panelId;
     return 'N/A';
   };
-  const getDisplayTicketNumber = (index: number) => `TCK ${String(index + 1).padStart(3, '0')}`;
+  const getScanPanelNumber = (scan: any) => {
+    if (!scan || !Array.isArray(scan.panelDetections) || scan.panelDetections.length === 0) return null;
+    const first = scan.panelDetections.find((p: any) => p.panelNumber) || scan.panelDetections[0];
+    return first?.panelNumber || null;
+  };
+  const getDisplayTicketNumber = (index: number) => `TK-${String(index + 1).padStart(3, '0')}`;
   const getDisplayTicketLabel = (ticket: TicketFromAPI, index: number) => {
     const row = ticket.panel?.row;
     const column = ticket.panel?.column;
@@ -205,7 +210,7 @@ export default function Tickets() {
           const alerts = await alertsRes.json();
           const alert = alerts.find((a: any) => a.ticketId === ticket.id);
           if (alert) {
-            setTicketAlertMeta({ alertId: alert.alertId || null, scanId: alert.scanId || null });
+            setTicketAlertMeta({ scanId: alert.scanId || null });
             if (alert.scanId) {
               const scanRes = await fetch(`/api/solar-scans/${alert.scanId}`);
               if (scanRes.ok) {
@@ -388,7 +393,15 @@ export default function Tickets() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Panel ID</label>
-                  <p className="mt-1">{getPanelId(ticketDetails)}</p>
+                  <p className="mt-1">
+                    {getScanPanelNumber(ticketScanDetails) || getPanelId(ticketDetails)}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Row ID</label>
+                  <p className="mt-1">
+                    {ticketDetails.panel?.row !== undefined ? `ROW ${ticketDetails.panel.row}` : 'N/A'}
+                  </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Fault Type</label>
@@ -407,7 +420,7 @@ export default function Tickets() {
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Alert ID</label>
                   <p className="mt-1 font-mono text-xs">
-                    {ticketAlertMeta?.alertId || 'N/A'}
+                    {ticketAlertMeta?.scanId || 'N/A'}
                   </p>
                 </div>
               </div>
@@ -431,97 +444,49 @@ export default function Tickets() {
                 </div>
               )}
 
-              {(ticketDetails.droneImageUrl || ticketDetails.fault?.droneImageUrl) && (
+              <div className="space-y-3">
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground">Drone Image</label>
-                  <img
-                    src={ticketDetails.droneImageUrl || ticketDetails.fault?.droneImageUrl}
-                    alt="Drone view"
-                    className="mt-1 w-full h-32 object-cover rounded-md"
-                  />
-                </div>
-              )}
-
-              {(ticketDetails.thermalImageUrl || ticketDetails.fault?.thermalImageUrl) && (
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground">Thermal Image</label>
-                  <img
-                    src={ticketDetails.thermalImageUrl || ticketDetails.fault?.thermalImageUrl}
-                    alt="Thermal view"
-                    className="mt-1 w-full h-32 object-cover rounded-md"
-                  />
-                </div>
-              )}
-
-              {ticketScanDetails && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">Scan Details</label>
-                    <div className="mt-1 grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Timestamp</span>
-                        <p className="mt-1">{ticketScanDetails.timestamp || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Device ID</span>
-                        <p className="mt-1">{ticketScanDetails.deviceId || 'N/A'}</p>
-                      </div>
+                  <label className="text-sm font-medium text-muted-foreground">Scan Details</label>
+                  <div className="mt-1 grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Timestamp</span>
+                      <p className="mt-1">{ticketScanDetails?.timestamp || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Device ID</span>
+                      <p className="mt-1">{ticketScanDetails?.deviceId || 'N/A'}</p>
                     </div>
                   </div>
-
-                  {(ticketScanDetails.rgbImageUrl || ticketScanDetails.thermalImageUrl) && (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      {ticketScanDetails.rgbImageUrl && (
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">Scan RGB</label>
-                          <img
-                            src={ticketScanDetails.rgbImageUrl}
-                            alt="Scan RGB"
-                            className="mt-1 w-full h-40 object-cover rounded-md"
-                          />
-                        </div>
-                      )}
-                      {ticketScanDetails.thermalImageUrl && (
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">Scan Thermal</label>
-                          <img
-                            src={ticketScanDetails.thermalImageUrl}
-                            alt="Scan Thermal"
-                            className="mt-1 w-full h-40 object-cover rounded-md"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {Array.isArray(ticketScanDetails.panelDetections) && ticketScanDetails.panelDetections.length > 0 && (
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground">Panel Crops</label>
-                      <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {ticketScanDetails.panelDetections.map((panel: any) => (
-                          <div key={panel.id} className="rounded-md border overflow-hidden">
-                            {panel.cropImageUrl ? (
-                              <img
-                                src={panel.cropImageUrl}
-                                alt={panel.panelNumber}
-                                className="w-full h-24 object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-24 flex items-center justify-center text-xs text-muted-foreground">
-                                No image
-                              </div>
-                            )}
-                            <div className="px-2 py-1 text-xs flex items-center justify-between">
-                              <span>{panel.panelNumber || 'Panel'}</span>
-                              <span className="text-muted-foreground">{panel.status}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
-              )}
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Scan RGB</label>
+                    {ticketScanDetails?.rgbImageUrl ? (
+                      <img
+                        src={ticketScanDetails.rgbImageUrl}
+                        alt="Scan RGB"
+                        className="mt-1 w-full h-40 object-cover rounded-md"
+                      />
+                    ) : (
+                      <div className="mt-1 h-40 w-full rounded-md border border-dashed border-muted-foreground/40 bg-muted/30" />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Scan Thermal</label>
+                    {ticketScanDetails?.thermalImageUrl ? (
+                      <img
+                        src={ticketScanDetails.thermalImageUrl}
+                        alt="Scan Thermal"
+                        className="mt-1 w-full h-40 object-cover rounded-md"
+                      />
+                    ) : (
+                      <div className="mt-1 h-40 w-full rounded-md border border-dashed border-muted-foreground/40 bg-muted/30" />
+                    )}
+                  </div>
+                </div>
+
+              </div>
 
               {ticketDetails.notes && ticketDetails.notes.length > 0 && (
                 <div>
@@ -586,7 +551,6 @@ export default function Tickets() {
                         <StatusIcon className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="text-xs font-medium text-muted-foreground">#{index + 1}</p>
                         <p className="font-semibold">{getDisplayTicketLabel(ticket, index)}</p>
                         <p className="text-sm text-muted-foreground">{ticket.faultType}</p>
                       </div>

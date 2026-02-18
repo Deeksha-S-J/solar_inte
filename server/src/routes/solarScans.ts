@@ -271,11 +271,8 @@ router.post('/', async (req: Request, res: Response) => {
 
               console.log('✅ Automation triggered (3s delay): Ticket', automationResult.ticketNumber, 'assigned to technician');
               
-              // Delete the scan after ticket creation - it now lives in tickets only
-              await prisma.solarScan.delete({
-                where: { id: scan.id }
-              });
-              console.log('🗑️ Scan removed from scans list - now visible in tickets only');
+              // Keep the scan so ticket details can display scan images and metadata
+              console.log('✅ Scan retained for ticket details');
           } else {
             console.log('⚠️ No panel found for automation - scan saved but no ticket created');
             await prisma.solarScan.update({
