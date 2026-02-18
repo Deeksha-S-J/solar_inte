@@ -62,16 +62,28 @@ router.post('/', async (req: Request, res: Response) => {
     );
 
 // Create SolarScan record
+    // Get average temperature from onsite ESP sensor (WeatherData table)
+    const latestWeather = await prisma.weatherData.findFirst({
+      orderBy: { recordedAt: 'desc' },
+      where: {
+        temperature: { gt: 0 }, // Only use valid readings
+      },
+    });
+    
+    // Use onsite sensor temperature as the mean, or fallback to Pi thermal mean
+    const avgTemperature = latestWeather?.temperature || thermal?.mean_temp || null;
+    
     const scan = await prisma.solarScan.create({
       data: {
         timestamp: timestamp ? new Date(timestamp) : new Date(),
         priority: priority || 'NORMAL',
         status: shouldAutoCreateTicket ? 'processing' : 'pending',
         
-        // Thermal data
+        // Thermal data from Pi camera (for delta/anomaly detection)
         thermalMinTemp: thermal?.min_temp || null,
         thermalMaxTemp: thermal?.max_temp || null,
-        thermalMeanTemp: thermal?.mean_temp || null,
+        // Use onsite ESP sensor temperature as mean (more accurate than thermal camera)
+        thermalMeanTemp: avgTemperature,
         thermalDelta: thermal?.delta || null,
         riskScore: thermal?.risk_score || null,
         severity: severity || null,
@@ -88,6 +100,13 @@ router.post('/', async (req: Request, res: Response) => {
         deviceName: deviceName || null,
       }
     });
+    
+    // Log which temperature source was used
+    if (latestWeather) {
+      console.log(`📊 Using onsite ESP sensor temp: ${latestWeather.temperature}°C (recorded: ${latestWeather.recordedAt})`);
+    } else if (thermal?.mean_temp) {
+      console.log(`📊 Using Pi thermal camera mean temp: ${thermal.mean_temp}°C (onsite sensor unavailable)`);
+    }
 
     // =====================================================
     // CREATE ALERT FOR THIS SCAN
