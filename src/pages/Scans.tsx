@@ -274,10 +274,18 @@ export default function Scans() {
   // Combine API scans with Pi scans for display
   const allScans = [...piScans, ...scans].filter((scan) => scan.priority !== 'NORMAL');
   
+  // Sort by timestamp (newest first) to get consistent sequence
+  const sortedAllScans = [...allScans].sort((a, b) => {
+    const dateA = new Date(a.createdAt || a.updatedAt || a.timestamp).getTime();
+    const dateB = new Date(b.createdAt || b.updatedAt || b.timestamp).getTime();
+    return dateB - dateA;
+  });
+  
   // Add source indicator to each scan
-  const scansWithSource = allScans.map(scan => ({
+  const scansWithSource = sortedAllScans.map((scan, index) => ({
     ...scan,
     isPiScan: scan.id.startsWith('pi-'),
+    _sequence: index + 1, // Continuous sequence number
   }));
   
   const filteredScans = scansWithSource.filter(scan => {
@@ -300,9 +308,8 @@ export default function Scans() {
     return scan.createdAt || scan.updatedAt || scan.timestamp;
   };
 
-  const getScanSequence = (scan: SolarScanFromAPI) => {
-    const idx = scansWithSource.findIndex((s) => s.id === scan.id);
-    return idx >= 0 ? idx + 1 : 0;
+  const getScanSequence = (scan: SolarScanFromAPI & { _sequence?: number }) => {
+    return scan._sequence || 1;
   };
 
   const getDisplayDeviceName = () => 'Drone';
