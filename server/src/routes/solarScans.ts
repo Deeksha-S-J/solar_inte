@@ -4,6 +4,13 @@ import { createFaultTicketAndAssignment, generateIncidentId, normalizeSeverity, 
 
 const router = Router();
 const DUPLICATE_WINDOW_SECONDS = 120;
+const toJpegDataUrl = (rawData?: string | null) => {
+  if (!rawData) return null;
+  if (rawData.startsWith('data:image/')) return rawData;
+  const parts = rawData.split(',');
+  const base64Data = parts.length > 1 ? parts[1] : parts[0];
+  return `data:image/jpeg;base64,${base64Data}`;
+};
 
 const nearlyEqual = (a?: number | null, b?: number | null, epsilon = 0.25) => {
   if (a == null || b == null) return true;
@@ -75,6 +82,8 @@ router.post('/', async (req: Request, res: Response) => {
       rgbImage,
       autoProcess // Flag to trigger automatic ticket creation
     } = req.body;
+    const thermalImageDataUrl = toJpegDataUrl(thermalImage);
+    const rgbImageDataUrl = toJpegDataUrl(rgbImage);
 
     // Count dusty and clean panels
     const dustyPanelCount = panels?.filter((p: any) => p.status === 'DUSTY').length || 0;
@@ -143,8 +152,8 @@ router.post('/', async (req: Request, res: Response) => {
           thermalDelta: thermal?.delta ?? recentCandidate.thermalDelta,
           riskScore: thermal?.risk_score ?? recentCandidate.riskScore,
           severity: severity || recentCandidate.severity || null,
-          thermalImageUrl: thermalImage || recentCandidate.thermalImageUrl,
-          rgbImageUrl: rgbImage || recentCandidate.rgbImageUrl,
+          thermalImageUrl: thermalImageDataUrl || recentCandidate.thermalImageUrl,
+          rgbImageUrl: rgbImageDataUrl || recentCandidate.rgbImageUrl,
           dustyPanelCount,
           cleanPanelCount,
           totalPanels,
@@ -171,8 +180,8 @@ router.post('/', async (req: Request, res: Response) => {
           thermalDelta: thermal?.delta || null,
           riskScore: thermal?.risk_score || null,
           severity: severity || null,
-          thermalImageUrl: thermalImage || null,
-          rgbImageUrl: rgbImage || null,
+          thermalImageUrl: thermalImageDataUrl || null,
+          rgbImageUrl: rgbImageDataUrl || null,
           
           // Summary counts
           dustyPanelCount,
@@ -338,8 +347,8 @@ router.post('/', async (req: Request, res: Response) => {
               recommendedAction: hasFaulty
                 ? 'Immediate technician dispatch for thermal fault verification'
                 : 'Schedule panel cleaning and technician validation',
-              droneImageUrl: rgbImage || undefined,
-              thermalImageUrl: thermalImage || undefined,
+              droneImageUrl: rgbImageDataUrl || undefined,
+              thermalImageUrl: thermalImageDataUrl || undefined,
               locationX: 0,
               locationY: 0,
               scanId: scan.id,

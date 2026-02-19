@@ -164,6 +164,14 @@ const decodeBase64Image = (rawData: string) => {
   return Buffer.from(base64Data, 'base64');
 };
 
+const toJpegDataUrl = (rawData?: string | null) => {
+  if (!rawData) return null;
+  if (rawData.startsWith('data:image/')) return rawData;
+  const parts = rawData.split(',');
+  const base64Data = parts.length > 1 ? parts[1] : parts[0];
+  return `data:image/jpeg;base64,${base64Data}`;
+};
+
 const getSeverityFromHealthScore = (healthScore: number): 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW' => {
   if (healthScore < 30) return 'CRITICAL';
   if (healthScore < 50) return 'HIGH';
@@ -410,6 +418,8 @@ io.on('connection', (socket) => {
       const safeCaptureId = sanitizeFilePart(captureId);
       let mainImageWebPath: string | null = null;
       let thermalImageWebPath: string | null = null;
+      const mainImageDataUrl = toJpegDataUrl(data.frame_b64);
+      const thermalImageDataUrl = toJpegDataUrl(data.thermal_b64);
 
       if (data.frame_b64) {
         const captureFileName = `capture_${safeCaptureId}_${timestampSuffix}.jpg`;
@@ -498,8 +508,8 @@ io.on('connection', (socket) => {
             thermalMaxTemp: thermalMaxTemp ?? recentCandidate.thermalMaxTemp,
             thermalMeanTemp: thermalMeanTemp ?? recentCandidate.thermalMeanTemp,
             thermalDelta: thermalDelta ?? recentCandidate.thermalDelta,
-            thermalImageUrl: thermalImageWebPath || recentCandidate.thermalImageUrl,
-            rgbImageUrl: mainImageWebPath || recentCandidate.rgbImageUrl,
+            thermalImageUrl: thermalImageDataUrl || thermalImageWebPath || recentCandidate.thermalImageUrl,
+            rgbImageUrl: mainImageDataUrl || mainImageWebPath || recentCandidate.rgbImageUrl,
             dustyPanelCount,
             cleanPanelCount,
             totalPanels,
@@ -537,8 +547,8 @@ io.on('connection', (socket) => {
             thermalMaxTemp,
             thermalMeanTemp,
             thermalDelta,
-            thermalImageUrl: thermalImageWebPath,
-            rgbImageUrl: mainImageWebPath,
+            thermalImageUrl: thermalImageDataUrl || thermalImageWebPath,
+            rgbImageUrl: mainImageDataUrl || mainImageWebPath,
             dustyPanelCount,
             cleanPanelCount,
             totalPanels,
@@ -580,8 +590,8 @@ io.on('connection', (socket) => {
           clean: cleanPanelCount,
           dusty: dustyPanelCount,
         },
-        main_image_web: mainImageWebPath,
-        thermal_image_web: thermalImageWebPath,
+        main_image_web: mainImageDataUrl || mainImageWebPath,
+        thermal_image_web: thermalImageDataUrl || thermalImageWebPath,
         thermal: {
           min_temp: thermalMinTemp,
           max_temp: thermalMaxTemp,
