@@ -21,6 +21,12 @@ interface PowerChartProps {
 export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const toDate = (timestamp: Date | string) => (timestamp instanceof Date ? timestamp : new Date(timestamp));
+  const toLocalDate = (timestamp: Date | string) => {
+    if (timestamp instanceof Date) return timestamp;
+    const match = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return new Date(timestamp);
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+  };
 
   const toPoints = (items: { timestamp: Date | string; value: number }[]) =>
     [...items]
@@ -69,17 +75,43 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
         );
       }
       case 'weekly': {
-        const pts = toPoints(weekly);
-        return aggregateByBucket(
-          pts,
-          (d) => format(d, 'yyyy-MM-dd'),
-          (d) => format(d, 'EEE')
-        );
+        const dayTotals = new Map<string, { sum: number; count: number }>();
+        for (const point of weekly) {
+          const date = toLocalDate(point.timestamp);
+          const key = format(date, 'yyyy-MM-dd');
+          const existing = dayTotals.get(key);
+          if (existing) {
+            existing.sum += point.value;
+            existing.count += 1;
+          } else {
+            dayTotals.set(key, { sum: point.value, count: 1 });
+          }
+        }
+
+        const end = new Date();
+        end.setHours(12, 0, 0, 0);
+
+        const points: Array<{ time: string; value: number }> = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(end);
+          d.setDate(end.getDate() - i);
+          const key = format(d, 'yyyy-MM-dd');
+          const day = dayTotals.get(key);
+          points.push({
+            time: format(d, 'EEE'),
+            value: day ? day.sum / day.count : 0,
+          });
+        }
+
+        return points;
       }
       case 'monthly': {
         const pts = toPoints(monthly);
         const monthSums = new Array<number>(12).fill(0);
         const monthCounts = new Array<number>(12).fill(0);
+        const weeklyPoints = toPoints(weekly);
+        const weeklyMax = weeklyPoints.reduce((max, p) => Math.max(max, p.value), 0);
+        const monthlyCap = weeklyMax > 0 ? weeklyMax : Number.POSITIVE_INFINITY;
 
         for (const point of pts) {
           const monthIdx = point.date.getMonth();
@@ -89,7 +121,10 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
 
         return Array.from({ length: 12 }, (_, monthIdx) => ({
           time: format(new Date(2000, monthIdx, 1), 'MMM'),
-          value: monthCounts[monthIdx] > 0 ? monthSums[monthIdx] / monthCounts[monthIdx] : 0,
+          value:
+            monthCounts[monthIdx] > 0
+              ? Math.min(monthSums[monthIdx] / monthCounts[monthIdx], monthlyCap)
+              : 0,
         }));
       }
     }
@@ -152,7 +187,7 @@ export function PowerChart({ daily, weekly, monthly }: PowerChartProps) {
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                 }}
                 labelStyle={{ color: 'hsl(var(--foreground))' }}
-                formatter={(value: number) => [`${value.toFixed(1)} kW`, 'Power']}
+                formatter={(value: number) => [`${value.toFixed(1)} W`, 'Power']}
               />
               <Area
                 type="monotone"

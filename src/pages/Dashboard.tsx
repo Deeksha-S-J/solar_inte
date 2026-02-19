@@ -242,7 +242,7 @@ export default function Dashboard() {
         
         // Then fetch secondary data (weather, power) in parallel - these can load in background
         const secondaryDataPromises = Promise.all([
-          fetchWithTimeout('/api/weather/current', 10000).catch(e => {
+          fetchWithTimeout('/api/weather/sensor-current', 10000).catch(e => {
             console.error('❌ Weather fetch failed:', e);
             return { ok: false } as Response;
           }),

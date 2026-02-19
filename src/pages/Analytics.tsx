@@ -128,10 +128,44 @@ export default function Analytics() {
 
   const { powerGeneration, efficiency, environmental, faultStatistics } = analytics;
 
-  const weeklyData = powerGeneration.weekly.filter((_, i) => i % 8 === 0).map(d => ({
-    time: format(d.timestamp, 'EEE'),
-    value: d.value,
-  }));
+  const toLocalDate = (timestamp: string | Date) => {
+    if (timestamp instanceof Date) return timestamp;
+    const match = timestamp.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return new Date(timestamp);
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+  };
+
+  const weeklyData = (() => {
+    const byDay = new Map<string, { sum: number; count: number }>();
+    for (const point of powerGeneration.weekly) {
+      const day = toLocalDate(point.timestamp);
+      const key = format(day, 'yyyy-MM-dd');
+      const existing = byDay.get(key);
+      if (existing) {
+        existing.sum += point.value;
+        existing.count += 1;
+      } else {
+        byDay.set(key, { sum: point.value, count: 1 });
+      }
+    }
+
+    const end = new Date();
+    end.setHours(12, 0, 0, 0);
+
+    const days: Array<{ time: string; value: number }> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(end.getDate() - i);
+      const key = format(d, 'yyyy-MM-dd');
+      const day = byDay.get(key);
+      days.push({
+        time: format(d, 'EEE'),
+        value: day ? day.sum / day.count : 0,
+      });
+    }
+
+    return days;
+  })();
 
   const monthlyTrend = efficiency.trend.map(d => ({
     date: format(d.date, 'MMM dd'),
@@ -219,7 +253,7 @@ export default function Analytics() {
                         border: '1px solid hsl(var(--border))',
                         borderRadius: '8px',
                       }}
-                      formatter={(value: number) => [`${value.toFixed(1)} kW`, 'Power']}
+                      formatter={(value: number) => [`${value.toFixed(1)} W`, 'Power']}
                     />
                     <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
                   </BarChart>

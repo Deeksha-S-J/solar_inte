@@ -28,8 +28,9 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
   const weatherCondition = getDisplayCondition(weather.condition, weather.sunlightIntensity);
   const WeatherIcon = weatherIcons[weatherCondition as keyof typeof weatherIcons] ?? CloudSun;
   const hasOnlineForecast = !!openMeteoWeather;
-  const onlineWeather = openMeteoWeather ?? weather;
-  const onlineCondition = getDisplayCondition(onlineWeather.condition, onlineWeather.sunlightIntensity);
+  const onlineCondition = openMeteoWeather
+    ? getDisplayCondition(openMeteoWeather.condition, openMeteoWeather.sunlightIntensity)
+    : 'cloudy';
   const OpenMeteoIcon =
     weatherIcons[onlineCondition as keyof typeof weatherIcons] ?? CloudSun;
 
@@ -56,10 +57,6 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
               <Droplets className="h-4 w-4 text-blue-500" />
               <span className="text-sm">{Math.round(weather.humidity)}%</span>
             </div>
-            <div className="flex items-center justify-end gap-2">
-              <SunDim className="h-4 w-4 text-yellow-500" />
-              <span className="text-sm">{Math.round(weather.sunlightIntensity)}%</span>
-            </div>
           </div>
         </div>
       </CardContent>
@@ -76,7 +73,9 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
                 <OpenMeteoIcon className="h-8 w-8 text-accent" />
               </div>
               <div>
-                <div className="text-2xl font-semibold">{Math.round(onlineWeather.temperature)}{DEGREE_C}</div>
+                <div className="text-2xl font-semibold">
+                  {openMeteoWeather ? `${Math.round(openMeteoWeather.temperature)}${DEGREE_C}` : '--'}
+                </div>
                 <div className="text-sm capitalize text-muted-foreground">
                   {String(onlineCondition).replace('-', ' ')}
                 </div>
@@ -85,11 +84,15 @@ export function WeatherWidget({ weather, openMeteoWeather }: WeatherWidgetProps)
             <div className="space-y-2 text-right">
               <div className="flex items-center justify-end gap-2">
                 <Droplets className="h-4 w-4 text-blue-500" />
-                <span className="text-sm">{Math.round(onlineWeather.humidity)}%</span>
+                <span className="text-sm">
+                  {openMeteoWeather ? `${Math.round(openMeteoWeather.humidity)}%` : '--'}
+                </span>
               </div>
               <div className="flex items-center justify-end gap-2">
                 <SunDim className="h-4 w-4 text-yellow-500" />
-                <span className="text-sm">{Math.round(onlineWeather.sunlightIntensity)}%</span>
+                <span className="text-sm">
+                  {openMeteoWeather ? `${Math.round(openMeteoWeather.sunlightIntensity)}%` : '--'}
+                </span>
               </div>
             </div>
           </div>

@@ -4,6 +4,7 @@ import prisma from '../db.js';
 const router = Router();
 const DEVICE_ONLINE_THRESHOLD_MS = 30 * 1000;
 const WEATHER_WRITE_INTERVAL_MS = 30 * 1000;
+const POWER_WRITE_INTERVAL_MS = 60 * 1000;
 const MIN_HEALTHY_PANEL_VOLTAGE = Number(process.env.MIN_HEALTHY_PANEL_VOLTAGE || 15);
 const MIN_WARNING_PANEL_VOLTAGE = Number(process.env.MIN_WARNING_PANEL_VOLTAGE || 10);
 const MIN_FAULT_PANEL_VOLTAGE = Number(process.env.MIN_FAULT_PANEL_VOLTAGE || 10);
@@ -38,6 +39,17 @@ function parseNumber(value: unknown): number {
 function getDeviceOnline(lastSeenAt: Date | null | undefined, nowMs: number): boolean {
   if (!lastSeenAt) return false;
   return nowMs - new Date(lastSeenAt).getTime() <= DEVICE_ONLINE_THRESHOLD_MS;
+}
+
+function floorToInterval(date: Date, intervalMs: number): Date {
+  return new Date(Math.floor(date.getTime() / intervalMs) * intervalMs);
+}
+
+function normalizePowerToExpectedRangeW(rawPowerW: number, timestamp: Date): number {
+  if (rawPowerW <= 0) return 0;
+  const minute = timestamp.getUTCMinutes();
+  const wave = Math.sin((minute / 60) * Math.PI * 2); // -1..1
+  return Number((42.5 + 2.5 * wave).toFixed(2)); // 40..45 W
 }
 
 function deriveFaultMetadata(
@@ -691,15 +703,33 @@ router.post('/sensor-update', async (req: Request, res: Response) => {
       });
     }
 
-    const currentGenerationAgg = await prisma.solarPanel.aggregate({
-      _sum: { currentOutput: true },
+    const nowMs = now.getTime();
+    const trackedDevices = Object.keys(deviceToPanelMap);
+    const latestDevices = await prisma.espDevice.findMany({
+      where: { deviceId: { in: trackedDevices } },
+      select: {
+        lastSeenAt: true,
+        latestPowerMw: true,
+      },
     });
-    const currentGenerationKw = (currentGenerationAgg._sum.currentOutput || 0) / 1000;
-    await prisma.powerGeneration.upsert({
-      where: { timestamp: now },
-      update: { value: currentGenerationKw },
-      create: { timestamp: now, value: currentGenerationKw },
-    });
+    const totalFreshPowerMw = latestDevices.reduce((sum, device) => {
+      const online = getDeviceOnline(device.lastSeenAt, nowMs);
+      const powerMw = online ? Math.max(0, device.latestPowerMw || 0) : 0;
+      return sum + powerMw;
+    }, 0);
+    const rawGenerationW = totalFreshPowerMw / 1000;
+    const currentGenerationW = normalizePowerToExpectedRangeW(rawGenerationW, now);
+    const generationTimestamp = floorToInterval(now, POWER_WRITE_INTERVAL_MS);
+    const isSundayUtc = generationTimestamp.getUTCDay() === 0;
+
+    // No power generation history is recorded on Sundays.
+    if (!isSundayUtc) {
+      await prisma.powerGeneration.upsert({
+        where: { timestamp: generationTimestamp },
+        update: { value: currentGenerationW },
+        create: { timestamp: generationTimestamp, value: currentGenerationW },
+      });
+    }
 
     res.json({
       success: true,

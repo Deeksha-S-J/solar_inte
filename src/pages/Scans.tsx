@@ -126,6 +126,7 @@ const panelStatusColors: Record<string, string> = {
 };
 
 export default function Scans() {
+  const DEGREE_C = '\u00B0C';
   const [scans, setScans] = useState<SolarScanFromAPI[]>([]);
   const [stats, setStats] = useState<SolarScanStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -440,7 +441,7 @@ export default function Scans() {
           : 'No immediate operational impact detected',
       source: 'fallback',
       baseline_aware: false,
-      deviation_from_baseline: scan.baselineDelta != null ? `${scan.baselineDelta.toFixed(1)}Â°C` : undefined,
+      deviation_from_baseline: scan.baselineDelta != null ? `${scan.baselineDelta.toFixed(1)}${DEGREE_C}` : undefined,
       genai_insights: undefined,
     };
   };
@@ -524,7 +525,7 @@ export default function Scans() {
             <CardContent className="flex items-center justify-between p-6">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Avg Delta</p>
-                <p className="text-3xl font-bold">{stats.avgThermalDelta?.toFixed(1)}Â°C</p>
+                <p className="text-3xl font-bold">{stats.avgThermalDelta?.toFixed(1)}{DEGREE_C}</p>
               </div>
               <div className="rounded-xl bg-orange-500/10 p-3">
                 <Thermometer className="h-6 w-6 text-orange-500" />
@@ -700,19 +701,19 @@ export default function Scans() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <label className="text-xs text-muted-foreground">Min Temp</label>
-                    <p className="text-lg font-semibold">{selectedScan.thermalMinTemp?.toFixed(1) || 'N/A'}Â°C</p>
+                    <p className="text-lg font-semibold">{selectedScan.thermalMinTemp?.toFixed(1) || 'N/A'}{DEGREE_C}</p>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Max Temp</label>
-                    <p className="text-lg font-semibold">{selectedScan.thermalMaxTemp?.toFixed(1) || 'N/A'}Â°C</p>
+                    <p className="text-lg font-semibold">{selectedScan.thermalMaxTemp?.toFixed(1) || 'N/A'}{DEGREE_C}</p>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Mean Temp</label>
-                    <p className="text-lg font-semibold">{selectedScan.thermalMeanTemp?.toFixed(1) || 'N/A'}Â°C</p>
+                    <p className="text-lg font-semibold">{selectedScan.thermalMeanTemp?.toFixed(1) || 'N/A'}{DEGREE_C}</p>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Delta</label>
-                    <p className="text-lg font-semibold">{selectedScan.thermalDelta?.toFixed(1) || 'N/A'}Â°C</p>
+                    <p className="text-lg font-semibold">{selectedScan.thermalDelta?.toFixed(1) || 'N/A'}{DEGREE_C}</p>
                   </div>
                 </div>
                 <div className="mt-4 flex items-center gap-4">

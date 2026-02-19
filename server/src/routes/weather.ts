@@ -320,6 +320,37 @@ router.get('/current', async (_req: Request, res: Response) => {
 });
 
 // Get weather history
+router.get('/sensor-current', async (_req: Request, res: Response) => {
+  try {
+    const latestSensorWeather = await prisma.weatherData.findFirst({
+      where: {
+        temperature: { gt: 0 },
+        humidity: { gt: 0 },
+      },
+      orderBy: { recordedAt: 'desc' },
+    });
+
+    if (!latestSensorWeather) {
+      return res.status(404).json({ error: 'No sensor weather data available' });
+    }
+
+    const ageMs = Date.now() - new Date(latestSensorWeather.recordedAt).getTime();
+    res.json({
+      ...latestSensorWeather,
+      windSpeed: 0,
+      cloudCover: 0,
+      uvIndex: Math.max(1, Math.round((100 - latestSensorWeather.sunlightIntensity) / 10)),
+      forecast: [],
+      source: 'esp32',
+      stale: ageMs > SENSOR_WEATHER_MAX_AGE_MS,
+    });
+  } catch (error) {
+    console.error('Error fetching sensor weather:', error);
+    res.status(500).json({ error: 'Failed to fetch sensor weather data' });
+  }
+});
+
+// Get weather history
 router.get('/history', async (req: Request, res: Response) => {
   try {
     const { days = 7 } = req.query;

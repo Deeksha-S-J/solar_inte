@@ -3,31 +3,81 @@ import prisma from '../db.js';
 
 const router = Router();
 
+type Period = 'daily' | 'weekly' | 'monthly';
+
+function resolveStartDate(period: Period): Date {
+  const now = new Date();
+  switch (period) {
+    case 'daily': {
+      // Daily graph should represent today (from local midnight), not rolling 24h.
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    case 'monthly':
+      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    case 'weekly':
+    default:
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+}
+
 // Get power generation data
 router.get('/power', async (req: Request, res: Response) => {
   try {
-    const { period = 'weekly' } = req.query;
+    const requestedPeriod = String(req.query.period || 'weekly');
+    const period: Period =
+      requestedPeriod === 'daily' || requestedPeriod === 'monthly' ? requestedPeriod : 'weekly';
+    const startDate = resolveStartDate(period);
 
-    let startDate: Date;
-    switch (period) {
-      case 'daily':
-        startDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        break;
-      case 'monthly':
-        startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    }
-
+    // Source of truth: PowerGeneration table only.
     const powerData = await prisma.powerGeneration.findMany({
-      where: {
-        timestamp: { gte: startDate },
-      },
+      where: { timestamp: { gte: startDate } },
+      select: { timestamp: true, value: true },
       orderBy: { timestamp: 'asc' },
     });
 
-    res.json(powerData);
+    const series = powerData.map((row) => ({ timestamp: row.timestamp, value: row.value }));
+
+    // Daily chart should reflect live ESP power even before the next minute bucket is persisted.
+    if (period === 'daily') {
+      const onlineThresholdMs = 30 * 1000;
+      const onlineSince = new Date(Date.now() - onlineThresholdMs);
+      const liveDevices = await prisma.espDevice.findMany({
+        where: {
+          lastSeenAt: { gte: onlineSince },
+          deviceId: {
+            not: {
+              startsWith: 'ESP-DUMMY-',
+            },
+          },
+        },
+        select: {
+          latestPowerMw: true,
+        },
+      });
+
+      const liveTotalW = liveDevices.reduce(
+        (sum, device) => sum + Math.max(0, (device.latestPowerMw || 0) / 1000),
+        0,
+      );
+
+      const now = new Date();
+      const liveValueW = Number(liveTotalW.toFixed(2)); // can be 0
+      const lastPoint = series[series.length - 1];
+      const lastTs = lastPoint ? new Date(lastPoint.timestamp).getTime() : 0;
+      const nowTs = now.getTime();
+
+      // Always keep a current point so graph shows 0 now and updates when ESP reports.
+      if (lastPoint && nowTs - lastTs <= 60 * 1000) {
+        lastPoint.timestamp = now;
+        lastPoint.value = liveValueW;
+      } else {
+        series.push({ timestamp: now, value: liveValueW });
+      }
+    }
+
+    res.json(series);
   } catch (error) {
     console.error('Error fetching power data:', error);
     res.status(500).json({ error: 'Failed to fetch power generation data' });

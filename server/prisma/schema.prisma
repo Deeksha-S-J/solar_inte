@@ -173,7 +173,7 @@ model User {
 model PowerGeneration {
   id         String   @id @default(cuid())
   timestamp  DateTime
-  value      Float    // kW
+  value      Float    // W
   createdAt  DateTime @default(now())
 
   @@unique([timestamp])
